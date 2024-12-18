@@ -8,34 +8,34 @@
 
 ## 🎨 Funcionalidades
 
-### 🔧 Customização de Templates
+### 🔧 Customização de Templates ![](https://progress-bar.xyz/100/)
 
-- Criação de templates padrão, configuráveis para diferentes tipos de chamados. ✅
-- Possibilidade de editar e salvar novos templates diretamente pela interface. ✅
+- Criação de templates padrão, configuráveis para diferentes tipos de chamados. ![](https://progress-bar.xyz/100/?width=75)
+- Possibilidade de editar e salvar novos templates diretamente pela interface. ![](https://progress-bar.xyz/100/?width=75)
 
-### 🖱️ Interface Intuitiva
+### 🖱️ Interface Intuitiva ![](https://progress-bar.xyz/90/)
 
-- **[WIP]** Barra personalizada para minimizar, mover e fixar a janela sempre no topo. 🚧
-- Botão de "Limpar Campos" para reiniciar os dados de entrada. ✅
+- Barra personalizada para minimizar, mover e fixar a janela sempre no topo. ![](https://progress-bar.xyz/80/?width=75)
+- Botão de "Limpar Campos" para reiniciar os dados de entrada. ![](https://progress-bar.xyz/100/?width=75)
 
-### 🔗 Inserção de Variáveis
+### 🔗 Inserção de Variáveis ![](https://progress-bar.xyz/100/)
 
-- **Menu interativo de variáveis** - `$Nome$`, `$Email$`, etc. -  que podem ser inseridas no texto com um clique, ideal para garantir consistência! ✅
+- **Menu interativo de variáveis** - `$Nome$`, `$Email$`, etc. -  que podem ser inseridas no texto com um clique - viva a consistência! ![](https://progress-bar.xyz/100/?width=75)
 
-### 🖋️ Modo de Edição
+### 🖋️ Modo de Edição ![](https://progress-bar.xyz/100/)
 
-- Habilite o modo de edição para ajustar o conteúdo do template manualmente, mantendo placeholders intactos. ✅
-- Desabilite o modo de edição para visualizar o texto com os dados preenchidos automaticamente. ✅
+- Habilite o modo de edição para ajustar o conteúdo do template manualmente, mantendo placeholders intactos. ![](https://progress-bar.xyz/100/?width=75)
+- Desabilite o modo de edição para visualizar o texto com os dados preenchidos automaticamente. ![](https://progress-bar.xyz/100/?width=75)
 
-### 📂 Gerenciamento de Templates
+### 📂 Gerenciamento de Templates ![](https://progress-bar.xyz/95/)
 
-- Salve novos templates com nomes personalizados. ✅
-- **[WIP]** Recarregue a lista de templates após salvá-los, garantindo acesso rápido às novas criações. 🚧
+- Salve novos templates com nomes personalizados. ![](https://progress-bar.xyz/100/?width=75)
+- Recarregue a lista de templates após salvá-los, garantindo acesso rápido às novas criações. ![](https://progress-bar.xyz/90/?width=75)
 
-### 🌟 Personalização Visual
+### 🌟 Personalização Visual ![](https://progress-bar.xyz/40/)
 
-- **[WIP]** Ícones representando os campos, utilizando imagens ou emojis. 🚧
-- **[WIP]** Paleta de cores suave e amigável, com opções de tema para o preview. 🚧
+-  Ícones representando os campos, utilizando imagens ou emojis. ![](https://progress-bar.xyz/35/?width=75)
+-  Paleta de cores suave e amigável, com opções de tema para o preview. ![](https://progress-bar.xyz/45/?width=75)
 
 ---
 
