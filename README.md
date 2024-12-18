@@ -60,11 +60,11 @@
 
 ### Tela Principal
 
-[Adicione aqui uma imagem do aplicativo]
+![image](https://github.com/user-attachments/assets/75db4328-9815-492a-b925-bc87678ceca4)
 
 ### Gerenciamento de Templates
 
-[Adicione aqui uma imagem do menu de templates]
+![image](https://github.com/user-attachments/assets/f20f8250-d13e-4b0b-a843-22c6b73f0cd8)
 
 ---
 
