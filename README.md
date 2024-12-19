@@ -64,7 +64,7 @@
 
 ### Gerenciamento de Templates
 
-![image](https://github.com/user-attachments/assets/f20f8250-d13e-4b0b-a843-22c6b73f0cd8)
+![Imagem](https://github.com/user-attachments/assets/38c3589e-0367-4340-a22e-ec8f962ee167)
 
 ---
 
