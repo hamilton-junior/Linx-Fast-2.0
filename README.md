@@ -60,7 +60,7 @@
 
 ### Tela Principal
 
-![image](https://github.com/user-attachments/assets/75db4328-9815-492a-b925-bc87678ceca4)
+![Imagem](https://github.com/user-attachments/assets/7c6642f5-c31e-4eec-9be5-ac241c0ec53d)
 
 ### Gerenciamento de Templates
 
