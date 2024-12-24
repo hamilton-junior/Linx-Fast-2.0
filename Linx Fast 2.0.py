@@ -2,7 +2,6 @@ import tkinter as tk
 from tkinter import messagebox, filedialog
 import pyperclip
 import os
-import unittest
 
 # Configuração inicial da janela principal
 app = tk.Tk()
