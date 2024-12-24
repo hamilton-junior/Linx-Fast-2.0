@@ -1,7 +1,7 @@
 import customtkinter
 
 #Tema
-customtkinter.set_default_color_theme("dark-blue")  # Themes: "blue" (standard), "green", "dark-blue"
+customtkinter.set_default_color_theme("Linx-Fast-2.0/data/theme.json")  # Themes: "blue" (standard), "green", "dark-blue"
 
 #Criação da Classe
 class App(customtkinter.CTk):
