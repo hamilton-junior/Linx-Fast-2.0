@@ -1,0 +1,12 @@
+Olá $Nome$,
+
+Identificamos o seguinte problema: $Problema Relatado$.
+CNPJ: $CNPJ$
+Telefone: $Telefone$
+Email: $Email$
+Protocolo: $Protocolo$
+
+Procedimento realizado: $Procedimento Executado$
+
+Atenciosamente,
+Equipe de Suporte.
