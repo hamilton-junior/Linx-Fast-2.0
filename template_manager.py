@@ -75,7 +75,7 @@ class TemplateManager:
                     self.templates[full_name] = self._read_template(os.path.join(root, file))
 
         if not self.templates:
-            self.add_template("Geral / Template Padrão", self.get_default_template())
+            self.add_template("Template Padrão", self.get_default_template())
 
     def _read_template(self, path):
         with open(path, "r", encoding="utf-8") as f:

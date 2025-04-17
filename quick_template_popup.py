@@ -1,71 +1,158 @@
 import customtkinter as ctk
-from tkinter import StringVar
-from tkinter import messagebox
+import pyperclip
+from field_entry import FieldEntry
 
 
 class QuickTemplatePopup(ctk.CTkToplevel):
     def __init__(self, master, manager):
         super().__init__(master)
-        self.title("Modo Rápido – Linx Fast")
-        self.manager = manager
-        self.geometry("325x250")
-        self.entries = {}
+        self.title("Modo Rápido")
+        self.geometry("500x600")
+        self.transient(master)
+        self.attributes("-topmost", False)
 
-        self.template_var = StringVar(value="")
+        self.manager = manager
+        self.fixed_fields = [
+            "Nome", "Problema Relatado", "CNPJ",
+            "Telefone", "Email", "Protocolo", "Procedimento Executado"
+        ]
+        self.dynamic_fields = []
+        self.entries = {}
+        self.has_copied = False
+
+        self.current_template = "Template Padrão"
+        self.current_template_display = ctk.StringVar(value=self.manager.meta.get_display_name(self.current_template))
+
         self._build_interface()
+        self.load_template_placeholders()
 
     def _build_interface(self):
-        self.grid_columnconfigure(0, weight=1)
+        self.main_frame = ctk.CTkFrame(self)
+        self.main_frame.pack(expand=True, fill="both", padx=10, pady=10)
 
-        title = ctk.CTkLabel(self, text="Selecionar Template", font=("Arial", 14, "bold"))
-        title.grid(row=0, column=0, pady=(5, 5))
+        top_bar = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        top_bar.pack(fill="x", pady=(0, 10))
 
-        self.template_dropdown = ctk.CTkOptionMenu(self, values=self.manager.get_template_names(),
-                                                    variable=self.template_var,
-                                                    command=self.load_template)
-        self.template_dropdown.grid(row=1, column=0, padx=20, pady=(0, 5), sticky="ew")
+        self.pin_btn = ctk.CTkButton(top_bar, text="📌", width=30, command=self.toggle_pin)
+        self.pin_btn.pack(side="left")
 
-        self.form_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.form_frame.grid(row=2, column=0, padx=20, pady=(5, 0), sticky="nsew")
+        self.theme_btn = ctk.CTkButton(top_bar, text="🌓", width=30, command=self.toggle_theme)
+        self.theme_btn.pack(side="right")
+
+        self.template_selector = ctk.CTkOptionMenu(
+            top_bar,
+            variable=self.current_template_display,
+            values=self.manager.get_display_names(),
+            command=self.on_template_change,
+            width=300
+        )
+        self.template_selector.pack(side="left", expand=True, padx=10)
+
+        self.form_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.form_frame.pack(fill="both", expand=True)
         self.form_frame.grid_columnconfigure(0, weight=1)
 
-        self.copy_btn = ctk.CTkButton(self, text="Copiar e Fechar", fg_color="#7E57C2",
-                                        command=self.copy_and_close)
-        self.copy_btn.grid(row=3, column=0, pady=(15, 0))
+        self.clear_btn = ctk.CTkButton(self.main_frame, text="🧽 Limpar Campos", width=120, command=self.clear_fields)
+        self.clear_btn.pack(pady=(5, 5), anchor="w")
 
-    def load_template(self, template_name):
-        self.entries.clear()
+        self.bottom_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.bottom_frame.pack(fill="x", pady=(10, 0))
+
+        ctk.CTkButton(self.bottom_frame, text="Copiar", command=self.copy_template).pack(fill="x", pady=5)
+        ctk.CTkLabel(self.main_frame, text="By Hamilton Junior", font=ctk.CTkFont(size=10), text_color="gray").pack(pady=(8, 0))
+
+    def draw_all_fields(self):
+        old_values = {k: v.get_value() for k, v in self.entries.items()}
+
         for widget in self.form_frame.winfo_children():
-            widget.destroy()
+            if isinstance(widget, FieldEntry):
+                widget.destroy()
 
-        content = self.manager.get_template(template_name)
+        self.entries.clear()
+
+        all_fields = self.fixed_fields + self.dynamic_fields
+        for field in all_fields:
+            field_widget = FieldEntry(
+                self.form_frame,
+                label_text=field,
+                on_focus_out_callback=self.on_field_exit
+            )
+            field_widget.pack(fill="x", pady=3)
+
+            field_widget.entry.was_invalid = False
+            field_widget.entry.configure(border_color=field_widget.entry.original_border_color)
+
+            if field in old_values and old_values[field]:
+                field_widget.entry.insert(0, old_values[field])
+            else:
+                field_widget.show_placeholder()
+
+            self.entries[field] = field_widget
+
+        self.after(100, self.adjust_window_height)
+
+    def clear_fields(self):
+        for field in self.entries.values():
+            field.entry.delete(0, "end")
+            field.entry.was_invalid = False
+            field.show_placeholder()
+            field.entry.configure(border_color=field.entry.original_border_color)
+
+    def copy_template(self):
+        template = self.manager.get_template(self.current_template)
+        self.has_copied = True
+        for field in self.entries.values():
+            value = field.get_value()
+            if not value:
+                field.mark_invalid()
+            template = template.replace(f"${field.placeholder}$", value if value else "")
+        pyperclip.copy(template)
+
+    def on_field_exit(self, field_entry):
+        if self.has_copied:
+            if not field_entry.get_value():
+                field_entry.mark_invalid()
+            elif field_entry.entry.was_invalid:
+                field_entry.mark_valid()
+        else:
+            if not field_entry.get_value():
+                field_entry.reset_border()
+                field_entry.show_placeholder()
+
+    def toggle_pin(self):
+        pinned = not self.attributes("-topmost")
+        self.attributes("-topmost", pinned)
+        self.pin_btn.configure(text="📌" if pinned else "📍")
+
+    def toggle_theme(self):
+        mode = ctk.get_appearance_mode()
+        ctk.set_appearance_mode("light" if mode == "Dark" else "dark")
+
+    def on_template_change(self, selected_display_name):
+        real_name = self.manager.meta.get_real_name(selected_display_name)
+        self.manager.load_templates()
+        self.template_selector.configure(values=self.manager.get_display_names())
+        self.current_template = real_name
+        self.current_template_display.set(self.manager.meta.get_display_name(real_name))
+        self.has_copied = False
+        self.load_template_placeholders()
+
+    def load_template_placeholders(self):
+        content = self.manager.get_template(self.current_template)
         placeholders = self.manager.extract_placeholders(content)
-        used_fields = sorted(placeholders)
+        self.dynamic_fields = [ph for ph in placeholders if ph not in self.fixed_fields]
+        self.draw_all_fields()
 
-        for i, field in enumerate(used_fields):
-            label = ctk.CTkLabel(self.form_frame, text=field)
-            label.grid(row=i, column=0, sticky="w", pady=(2, 2))
+    def adjust_window_height(self, extra_padding=50):
+        self.update_idletasks()
+        content_height = self.main_frame.winfo_reqheight()
+        screen_height = self.winfo_screenheight()
+        max_height = int(screen_height * 0.9)
 
-            entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field}")
-            entry.grid(row=i, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
-            self.entries[field] = entry
+        desired_height = content_height + extra_padding
+        final_height = min(desired_height, max_height)
 
-        # Ajusta o tamanho da janela com base nos campos
-        new_height = 105 + len(used_fields) * 35
-        self.geometry(f"400x{new_height}")
-
-    def copy_and_close(self):
-        template_name = self.template_var.get()
-        if not template_name:
-            messagebox.showerror("Erro", "Selecione um template.")
-            return
-
-        content = self.manager.get_template(template_name)
-
-        for key, entry in self.entries.items():
-            value = entry.get()
-            content = content.replace(f"${key}$", value if value else "")
-
-        import pyperclip
-        pyperclip.copy(content)
-        self.destroy()
+        width = self.winfo_width()
+        x, y = self.winfo_x(), self.winfo_y()
+        self.geometry(f"{width}x{final_height}+{x}+{y}")
+    

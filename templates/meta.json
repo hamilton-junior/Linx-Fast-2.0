@@ -1,9 +1,13 @@
 {
-  "Suporte / DALE GARAIO": {
+  "Template Padrão": {
+    "favorito": true,
+    "protegido": true
+  },
+  "Geral / Exemplo": {
     "favorito": false,
     "protegido": false
   },
-  "Template Padrão": {
+  "Suporte / Exemplo": {
     "favorito": true,
     "protegido": false
   }
