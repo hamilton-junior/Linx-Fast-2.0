@@ -11,6 +11,8 @@ class TemplateApp(ctk.CTk):
         super().__init__()
         self.title("Linx Fast 2.0")
         self.geometry("415x500")
+        self.visual_feedback_enabled = True
+
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("green")
@@ -127,6 +129,8 @@ class TemplateApp(ctk.CTk):
         entry.insert(0, value)
         entry.grid(row=0, column=1, sticky="ew")
         self.entries[name] = entry
+        entry.original_border_color = entry.cget("border_color")  # salvar cor original
+        
 
         if is_dynamic:
             btn_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
@@ -171,14 +175,25 @@ class TemplateApp(ctk.CTk):
 
     def copy_template(self):
         template = self.manager.get_template(self.current_template)
+        tem_vazios = False
+
         for key, entry in self.entries.items():
             value = entry.get()
             if not value:
                 entry.configure(border_color="red")
+                entry.bind("<FocusIn>", lambda e, ent=entry: ent.configure(border_color=ent.original_border_color))
+                entry.bind("<FocusOut>", lambda e, ent=entry: self.animate_field_success(ent) if ent.get() else None)
+
+                tem_vazios = True
             template = template.replace(f"${key}$", value if value else "")
+
         pyperclip.copy(template)
-        self.pulse_window()  # feedback visual 🎉
-        self.show_snackbar()  # feedback visual  🎉
+        self.pulse_window()
+        self.show_snackbar("Copiado com sucesso!", toast_type="success")
+
+        if tem_vazios:
+            self.show_snackbar("Existem campos em branco!", toast_type="warning")
+
 
     def preview_template(self):
         template = self.manager.get_template(self.current_template)
@@ -331,6 +346,30 @@ class TemplateApp(ctk.CTk):
 
         self.after(duration, lambda: fade_out())
 
+    def animate_field_success(self, entry):
+        if self.visual_feedback_enabled:    
+            entry.configure(border_color="#00C853")  # verde sucesso
+
+            # Pulse: aumentar e voltar o tamanho da fonte levemente
+            def pulse(step=0):
+                size = 12 + (1 if step % 2 == 0 else 0)
+                entry.configure(font=ctk.CTkFont(size=size))
+                if step < 4:
+                    self.after(100, lambda: pulse(step + 1))
+                else:
+                    entry.configure(font=ctk.CTkFont(size=12))
+                    entry.configure(border_color=entry.original_border_color)
+
+            pulse()
+
+    def pulse_button_success(self, button, original_color="#7E57C2", success_color="#00C853"):
+        # Salva a cor original
+        button.configure(fg_color=success_color)
+
+        def restore():
+            button.configure(fg_color=original_color)
+
+        self.after(500, restore)
 
 
 
