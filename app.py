@@ -302,7 +302,7 @@ class TemplateApp(ctk.CTk):
             "error": {"fg": "#D32F2F", "icon": "✖"},
             "warning": {"fg": "#FBC02D", "icon": "⚠"},
             "info": {"fg": "#1976D2", "icon": "ℹ"},
-            "default": {"fg": "#323232", "icon": "•"},
+            "default": {"fg": "#AE00FF", "icon": "•"},
         }
 
         style = styles.get(toast_type, styles["default"])
