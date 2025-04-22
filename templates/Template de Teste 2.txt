@@ -1,3 +1,0 @@
-Cliente: $Nome$
-Detalhes do Problema: $Problema$
-Contato: $Telefone$
