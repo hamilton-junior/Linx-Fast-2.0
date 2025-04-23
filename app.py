@@ -3,6 +3,7 @@ import pyperclip
 import json
 from template_editor import TemplateEditor
 from template_manager import TemplateManager
+from theme_manager import ThemeManager
 from customtkinter import CTkInputDialog
 
 
@@ -10,15 +11,15 @@ class TemplateApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Linx Fast 2.0")
-        self.geometry("415x500")
+        self.geometry("360x535")
         self.visual_feedback_enabled = True
 
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("green")
 
-        self.manager = TemplateManager()
-
+        self.template_manager = TemplateManager()
+        self.theme_manager = ThemeManager()
         self.fixed_fields = [
             "Nome", "Problema Relatado", "CNPJ",
             "Telefone", "Email", "Protocolo", "Procedimento Executado"
@@ -27,8 +28,8 @@ class TemplateApp(ctk.CTk):
         self.entries = {}
         self.field_widgets = {}
 
-        self.current_template = "Geral / Template Padrão"
-        self.current_template_display = ctk.StringVar(value=self.manager.meta.get_display_name(self.current_template))
+        self.current_template = "Template Padrão"
+        self.current_template_display = ctk.StringVar(value=self.template_manager.meta.get_display_name(self.current_template))
 
 
         self.grid_columnconfigure(0, weight=1)
@@ -49,13 +50,22 @@ class TemplateApp(ctk.CTk):
         self.main_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         self.main_frame.grid_columnconfigure(0, weight=1)
 
+        
         selector_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         selector_frame.grid(row=0, column=0, sticky="w", padx=5, pady=(5, 5))
 
+        self.pin_button = ctk.CTkButton(
+            selector_frame,
+            text="📍",
+            command=self.toggle_always_on_top,
+            width=30
+            )
+        self.pin_button.pack(side="left", padx=(0, 5))
+        
         self.template_selector = ctk.CTkOptionMenu(
             selector_frame,
             variable=self.current_template_display,
-            values=self.manager.get_display_names(),
+            values=self.template_manager.get_display_names(),
             command=self.on_template_change,
             width=300
         )
@@ -173,8 +183,19 @@ class TemplateApp(ctk.CTk):
         except (ValueError, IndexError):
             pass
 
+    def toggle_always_on_top(self):
+        current = self.attributes("-topmost")
+        new_state = not current
+        self.attributes("-topmost", new_state)
+        self.pin_button.configure(fg_color="green" if new_state else self.theme_manager.get_theme_default_color(ctk.CTkButton, "fg_color"))
+        self.pin_button.configure(text="📌" if new_state else "📍")
+        if new_state:
+            self.show_snackbar("PIN ativado!", toast_type="info")
+        else:
+            self.show_snackbar("PIN desativado!", toast_type="info")
+
     def copy_template(self):
-        template = self.manager.get_template(self.current_template)
+        template = self.template_manager.get_template(self.current_template)
         tem_vazios = False
 
         for key, entry in self.entries.items():
@@ -196,7 +217,7 @@ class TemplateApp(ctk.CTk):
 
 
     def preview_template(self):
-        template = self.manager.get_template(self.current_template)
+        template = self.template_manager.get_template(self.current_template)
         for key, entry in self.entries.items():
             value = entry.get()
             template = template.replace(f"${key}$", value if value else "")
@@ -213,8 +234,8 @@ class TemplateApp(ctk.CTk):
         box.pack(expand=True, fill="both", padx=20, pady=20)
 
     def load_template_placeholders(self):
-        template_content = self.manager.get_template(self.current_template)
-        placeholders = self.manager.extract_placeholders(template_content)
+        template_content = self.template_manager.get_template(self.current_template)
+        placeholders = self.template_manager.extract_placeholders(template_content)
 
         # resetar apenas os dinâmicos
         self.dynamic_fields = [ph for ph in placeholders if ph not in self.fixed_fields]
@@ -227,21 +248,21 @@ class TemplateApp(ctk.CTk):
                 "dynamic": self.dynamic_fields
             }
 
-        TemplateEditor(self, self.manager, get_fields, current_template=self.current_template)
+        TemplateEditor(self, self.template_manager, get_fields, current_template=self.current_template)
         
     def open_quick_mode(self):
         from quick_template_popup import QuickTemplatePopup
-        QuickTemplatePopup(self, self.manager)
+        QuickTemplatePopup(self, self.template_manager)
 
     def on_template_change(self, selected_display_name):
-        real_name = self.manager.meta.get_real_name(selected_display_name)
+        real_name = self.template_manager.meta.get_real_name(selected_display_name)
 
         # Sempre recarrega lista atualizada
-        self.manager.load_templates()
-        self.template_selector.configure(values=self.manager.get_display_names())
+        self.template_manager.load_templates()
+        self.template_selector.configure(values=self.template_manager.get_display_names())
 
         self.current_template = real_name
-        self.current_template_display.set(self.manager.meta.get_display_name(real_name))
+        self.current_template_display.set(self.template_manager.meta.get_display_name(real_name))
         self.load_template_placeholders()
 
     def adjust_window_height(self):
@@ -261,8 +282,8 @@ class TemplateApp(ctk.CTk):
         self.update_idletasks()
 
         current_width = self.winfo_width()
-        if current_width < 400:
-            current_width = 500  # largura mínima
+        if current_width < 350:
+            current_width = 350  # largura mínima
 
         current_height = self.winfo_height()
         x, y = self.winfo_x(), self.winfo_y()

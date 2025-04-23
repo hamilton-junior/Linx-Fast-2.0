@@ -1,13 +1,17 @@
 import customtkinter as ctk
 from tkinter import StringVar
 from tkinter import messagebox
-
+from app import TemplateApp
+from template_editor import TemplateEditor
+from template_manager import TemplateManager
+from theme_manager import ThemeManager
 
 class QuickTemplatePopup(ctk.CTkToplevel):
     def __init__(self, master, manager):
         super().__init__(master)
         self.title("Modo Rápido – Linx Fast")
         self.manager = manager
+        self.theme_manager = ThemeManager()
         self.geometry("325x250")
         self.entries = {}
 
@@ -15,23 +19,56 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self._build_interface()
 
     def _build_interface(self):
-        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=0)  # coluna do botão pin
+        self.grid_columnconfigure(1, weight=1)  # coluna do dropdown expansível
 
+        # Título
         title = ctk.CTkLabel(self, text="Selecionar Template", font=("Arial", 14, "bold"))
-        title.grid(row=0, column=0, pady=(5, 5))
+        title.grid(row=0, column=0, columnspan=2, pady=(5, 0), padx=10, sticky="ew")
 
-        self.template_dropdown = ctk.CTkOptionMenu(self, values=self.manager.get_template_names(),
-                                                    variable=self.template_var,
-                                                    command=self.load_template)
-        self.template_dropdown.grid(row=1, column=0, padx=20, pady=(0, 5), sticky="ew")
+        # Botão fixo à esquerda
+        self.pin_button = ctk.CTkButton(
+            self,
+            text="📍",
+            width=36,
+            command=self.toggle_always_on_top
+        )
+        self.pin_button.grid(row=1, column=0, padx=(10, 5), pady=5, sticky="w")
 
+        # Dropdown expansível ocupando o espaço restante
+        self.template_dropdown = ctk.CTkOptionMenu(
+            self,
+            values=self.manager.get_template_names(),
+            variable=self.template_var,
+            command=self.load_template
+        )
+        self.template_dropdown.grid(row=1, column=1, padx=(0, 10), pady=5, sticky="ew")
+
+        # Frame para os campos
         self.form_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.form_frame.grid(row=2, column=0, padx=20, pady=(5, 0), sticky="nsew")
+        self.form_frame.grid(row=2, column=0, columnspan=2, padx=20, pady=(5, 0), sticky="nsew")
         self.form_frame.grid_columnconfigure(0, weight=1)
 
-        self.copy_btn = ctk.CTkButton(self, text="Copiar e Fechar", fg_color="#7E57C2",
-                                        command=self.copy_and_close)
-        self.copy_btn.grid(row=3, column=0, pady=(15, 0))
+        # Botão de ação
+        self.copy_btn = ctk.CTkButton(
+            self,
+            text="Copiar",
+            fg_color="#7E57C2",
+            command=self.copy_template
+        )
+        self.copy_btn.grid(row=3, column=0, columnspan=2, pady=(15, 10), padx=20, sticky="ew")
+
+    def toggle_always_on_top(self):
+        current = self.attributes("-topmost")
+        new_state = not current
+        self.attributes("-topmost", new_state)
+        self.pin_button.configure(fg_color="green" if new_state else self.theme_manager.get_theme_default_color(ctk.CTkButton, "fg_color"))
+        self.pin_button.configure(text="📌" if new_state else "📍")
+        if new_state:
+            TemplateApp.show_snackbar("PIN ativado!", toast_type="info")
+        else:
+            TemplateApp.show_snackbar("PIN desativado!", toast_type="info")
+
 
     def load_template(self, template_name):
         self.entries.clear()
@@ -53,6 +90,21 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         # Ajusta o tamanho da janela com base nos campos
         new_height = 105 + len(used_fields) * 35
         self.geometry(f"400x{new_height}")
+
+    def copy_template(self):
+        template_name = self.template_var.get()
+        if not template_name:
+            messagebox.showerror("Erro", "Selecione um template.")
+            return
+
+        content = self.manager.get_template(template_name)
+
+        for key, entry in self.entries.items():
+            value = entry.get()
+            content = content.replace(f"${key}$", value if value else "")
+
+        import pyperclip
+        pyperclip.copy(content)
 
     def copy_and_close(self):
         template_name = self.template_var.get()
