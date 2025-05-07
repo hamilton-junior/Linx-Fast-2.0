@@ -9,7 +9,7 @@ from theme_manager import ThemeManager
 class QuickTemplatePopup(ctk.CTkToplevel):
     def __init__(self, master, manager):
         super().__init__(master)
-        self.title("Modo Rápido – Linx Fast")
+        self.title("Modo Simples – Linx Fast")
         self.manager = manager
         self.theme_manager = ThemeManager()
         self.geometry("325x250")
@@ -56,7 +56,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             fg_color="#7E57C2",
             command=self.copy_template
         )
-        self.copy_btn.grid(row=3, column=0, columnspan=2, pady=(15, 10), padx=20, sticky="ew")
+        self.copy_btn.grid(row=3, column=0, columnspan=2, pady=(15, 15), padx=20, sticky="ew")
 
     def toggle_always_on_top(self):
         current = self.attributes("-topmost")

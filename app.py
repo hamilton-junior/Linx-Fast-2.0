@@ -1,10 +1,18 @@
 import customtkinter as ctk
 import pyperclip
 import json
+import sys
 from template_editor import TemplateEditor
 from template_manager import TemplateManager
 from theme_manager import ThemeManager
 from customtkinter import CTkInputDialog
+
+if sys.platform == "win32":
+    import ctypes
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # SYSTEM_AWARE
+    except Exception as e:
+        print(f"[DPI WARNING] Could not set DPI awareness: {e}")
 
 
 class TemplateApp(ctk.CTk):
@@ -94,7 +102,7 @@ class TemplateApp(ctk.CTk):
                         fg_color="#333", hover_color="#444", font=ctk.CTkFont(size=12))
         self.add_btn.grid(row=5, column=0, pady=(5, 2))
 
-        ctk.CTkButton(self.main_frame, text="Modo Rápido",
+        ctk.CTkButton(self.main_frame, text="Modo Simples",
                         fg_color="#5E35B1", hover_color="#4527A0",
                         command=self.open_quick_mode).grid(row=6, column=0, pady=(2, 5))
 
@@ -115,7 +123,7 @@ class TemplateApp(ctk.CTk):
             self._draw_field(field, row, old_values.get(field, ""), is_dynamic=True)
             row += 1
             
-        self.adjust_window_height()
+        self.after(100, self.adjust_window_height)
 
 
     def _should_wrap_label(self, text):
@@ -268,15 +276,31 @@ class TemplateApp(ctk.CTk):
     def adjust_window_height(self):
         self.update_idletasks()
 
-        form_height = self.form_frame.winfo_height()
+        # Altura real do conteúdo do formulário
+        form_height = self.form_frame.winfo_reqheight()  # ← usa o tamanho *requisitado*
         extra_height = 250
+
         screen_height = self.winfo_screenheight()
         max_height = int(screen_height * 0.9)
 
         desired_height = form_height + extra_height
         new_height = min(desired_height, max_height)
 
-        self.animate_resize_to(new_height, on_complete=self.save_window_config)
+        # Largura atual (fallback se necessário)
+        width = self.winfo_width()
+        if width <= 10:
+            width = 500  # valor padrão inicial
+
+        # Mantém a posição atual
+        x = self.winfo_x()
+        y = self.winfo_y()
+
+        # Garante altura mínima para evitar efeitos indesejados
+        min_height = 415
+        final_height = max(new_height, min_height)
+
+        self.animate_resize_to(final_height, on_complete=self.save_window_config)
+
 
     def animate_resize_to(self, target_height, step=10, delay=10, on_complete=None):
         self.update_idletasks()

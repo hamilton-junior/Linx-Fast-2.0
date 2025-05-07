@@ -1,5 +1,13 @@
 {
-  "Template Padrão": {
+  "Suporte / Abertura de Chamado": {
+    "favorito": true,
+    "protegido": false
+  },
+  "Suporte / Conclusão": {
+    "favorito": true,
+    "protegido": false
+  },
+  "Suporte / Falta de interação": {
     "favorito": true,
     "protegido": false
   }
