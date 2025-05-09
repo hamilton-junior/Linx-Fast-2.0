@@ -1,0 +1,9 @@
+Sr(a). $Nome$, realizamos os seguintes passos para a resolução do atendimento #$Protocolo$:
+
+$Procedimento Executado$
+
+Vou enviar para o e-mail cadastrado no chamado ($Email$) uma pesquisa para avaliar sua experiência com meu atendimento. :D
+É bem simples, mas muito importante para o desenvolvimento e melhoria do meu atendimento ^^
+Lembrando que na avaliação a nota é atribuída ao meu atendimento e não a empresa ou sistema. 
+
+O atendimento poderá ser reaberto dentro do prazo de 5 dias. Após esta data, favor acionar a central de atendimento no site https://suportelinx.my.site.com/PortalCliente/s/login/ ou pelo canal corporativo para abertura de um novo protocolo.
