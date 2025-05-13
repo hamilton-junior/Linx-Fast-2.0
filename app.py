@@ -2,9 +2,11 @@ import customtkinter as ctk
 import pyperclip
 import json
 import sys
+import os
 from template_editor import TemplateEditor
 from template_manager import TemplateManager
 from theme_manager import ThemeManager
+from dpm import DailyPasswordManager
 from customtkinter import CTkInputDialog
 
 if sys.platform == "win32":
@@ -26,8 +28,10 @@ class TemplateApp(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("green")
 
+        #Inicialização das classes
         self.template_manager = TemplateManager()
         self.theme_manager = ThemeManager()
+        self.password_manager = DailyPasswordManager()
         self.fixed_fields = [
             "Nome", "Problema Relatado", "CNPJ",
             "Telefone", "Email", "Protocolo", "Procedimento Executado"
@@ -36,7 +40,7 @@ class TemplateApp(ctk.CTk):
         self.entries = {}
         self.field_widgets = {}
 
-        self.current_template = "Template Padrão"
+        self.current_template = "Selecione o template..."
         self.current_template_display = ctk.StringVar(value=self.template_manager.meta.get_display_name(self.current_template))
 
 
@@ -84,24 +88,30 @@ class TemplateApp(ctk.CTk):
         self.form_frame.grid_columnconfigure(0, weight=1)
 
         self.draw_all_fields()
+        
+        # Botão de Senha Diária
+        self.btn_daily_password = ctk.CTkButton(self.main_frame, text="PW", command=self.handle_daily_password, width=1, height=1,anchor="center")
+        self.btn_daily_password.grid(sticky="w",row=2, column=0, padx=(5,0),pady=(5, 0))
+        self.btn_daily_password.bind("<Button-3>", lambda e: (self.password_manager.set_today_password(None), self.show_snackbar("Senha diária resetada!", toast_type="info")))
 
+        #Botão de Copiar Template
         ctk.CTkButton(self.main_frame, text="Copiar para área de transferência",
                         fg_color="#7E57C2", hover_color="#6A4BB3",
                         command=self.copy_template).grid(row=2, column=0, pady=(15, 5))
-
+        #Botão de Visualizar Template
         ctk.CTkButton(self.main_frame, text="Visualizar Resultado",
                         fg_color="#5E35B1", hover_color="#512DA8",
                         command=self.preview_template).grid(row=3, column=0, pady=(5, 5))
-
+        #Botão de Editar Template
         ctk.CTkButton(self.main_frame, text="Editar Templates",
                         fg_color="#7E57C2", hover_color="#6A4BB3",
                         command=self.open_template_editor).grid(row=4, column=0, pady=(5, 10))
-
+        #Botão de Adicionar Campo
         self.add_btn = ctk.CTkButton(self.main_frame, text="+ Adicionar Campo", width=150, height=30,
                         command=self.prompt_new_field,
                         fg_color="#333", hover_color="#444", font=ctk.CTkFont(size=12))
         self.add_btn.grid(row=5, column=0, pady=(5, 2))
-
+        #Botão de Modo Simples
         ctk.CTkButton(self.main_frame, text="Modo Simples",
                         fg_color="#5E35B1", hover_color="#4527A0",
                         command=self.open_quick_mode).grid(row=6, column=0, pady=(2, 5))
@@ -262,6 +272,20 @@ class TemplateApp(ctk.CTk):
         from quick_template_popup import QuickTemplatePopup
         QuickTemplatePopup(self, self.template_manager)
 
+    def handle_daily_password(self):
+        if senha := self.password_manager.get_today_password():
+            try:
+                pyperclip.copy(senha)
+                self.show_snackbar("Senha diária copiada!")
+            except Exception:
+                self.show_snackbar("Falha ao copiar senha para a área de transferência!", toast_type="error")
+        else:
+            dialog = CTkInputDialog(title="Senha Diária", text="Informe a senha de hoje:")
+            if senha_input := dialog.get_input():
+                self.password_manager.set_today_password(senha_input)
+                pyperclip.copy(senha_input)
+                self.show_snackbar("Senha diária salva e copiada!")
+
     def on_template_change(self, selected_display_name):
         real_name = self.template_manager.meta.get_real_name(selected_display_name)
 
@@ -417,18 +441,31 @@ class TemplateApp(ctk.CTk):
         self.after(500, restore)
 
 
-
-
     def save_window_config(self):
         self.update_idletasks()
         width, height = self.winfo_width(), self.winfo_height()
+
         if height >= 300:
             geometry_str = self.geometry()
+
             try:
+                # Carrega o config existente, se houver
+                if os.path.exists("config.json"):
+                    with open("config.json", "r", encoding="utf-8") as f:
+                        config = json.load(f)
+                else:
+                    config = {}
+
+                # Atualiza a geometria
+                config["geometry"] = geometry_str
+
+                # Salva o arquivo atualizado
                 with open("config.json", "w", encoding="utf-8") as f:
-                    json.dump({"geometry": geometry_str}, f)
-            except Exception:
-                pass
+                    json.dump(config, f)
+
+            except Exception as e:
+                print(f"[ERRO ao salvar config]: {e}")
+
 
     def load_window_config(self):
         try:
