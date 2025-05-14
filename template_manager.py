@@ -75,7 +75,7 @@ class TemplateManager:
                     self.templates[full_name] = self._read_template(os.path.join(root, file))
 
         if not self.templates:
-            self.add_template("Geral / Template Padrão", self.get_default_template())
+            self.add_template("Template Padrão", self.get_default_template())
 
     def _read_template(self, path):
         with open(path, "r", encoding="utf-8") as f:
@@ -86,12 +86,10 @@ class TemplateManager:
 
     def get_default_template(self):
         return (
-            "Olá $Nome$,\n\n"
-            "Identificamos o seguinte problema: $Problema Relatado$.\n"
-            "CNPJ: $CNPJ$\n"
-            "Telefone: $Telefone$\n"
-            "Email: $Email$\n"
-            "Protocolo: $Protocolo$\n\n"
-            "Procedimento realizado: $Procedimento Executado$\n\n"
-            "Atenciosamente,\nEquipe de Suporte."
+            "𝐃𝐚𝐝𝐨𝐬 𝐝𝐞 𝐂𝐨𝐧𝐭𝐚𝐭𝐨: $Nome$ - $Telefone$\n"
+            "𝗖𝗡𝗣𝗝: $CNPJ$\n"
+            "𝗘-𝗺𝗮𝗶𝗹: $Email$\n"
+            "𝐃𝐞𝐬𝐜𝐫𝐢𝐜̧𝐚̃𝐨: $Problema Relatado$\n"
+            "𝐏𝐞𝐬𝐪𝐮𝐢𝐬𝐚 𝐈𝐧𝐭𝐞𝐫𝐧𝐚: Sim.\n\n"
+            "---------------------------------------------------------------------------------------------\n\n"
         )

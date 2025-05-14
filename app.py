@@ -90,14 +90,27 @@ class TemplateApp(ctk.CTk):
         self.draw_all_fields()
         
         # Botão de Senha Diária
-        self.btn_daily_password = ctk.CTkButton(self.main_frame, text="PW", command=self.handle_daily_password, width=1, height=1,anchor="center")
+        self.btn_daily_password = ctk.CTkButton(self.main_frame, text="PW", command=self.handle_daily_password, width=1, height=30,anchor="center")
         self.btn_daily_password.grid(sticky="w",row=2, column=0, padx=(5,0),pady=(5, 0))
         self.btn_daily_password.bind("<Button-3>", lambda e: (self.password_manager.set_today_password(None), self.show_snackbar("Senha diária resetada!", toast_type="info")))
+
+        # Botão de Limpar Campos
+        self.btn_limpar_campos = ctk.CTkButton(
+            self.main_frame,
+            text="❌",
+            fg_color="#A94444",
+            hover_color="#912F2F",
+            anchor="right",
+            width=1,
+            height=30,
+            command=self.limpar_campos
+        )
+        self.btn_limpar_campos.grid(row=2, column=0, pady=(5, 0), sticky="e")
 
         #Botão de Copiar Template
         ctk.CTkButton(self.main_frame, text="Copiar para área de transferência",
                         fg_color="#7E57C2", hover_color="#6A4BB3",
-                        command=self.copy_template).grid(row=2, column=0, pady=(15, 5))
+                        command=self.copy_template).grid(row=2, column=0, pady=(5, 5))
         #Botão de Visualizar Template
         ctk.CTkButton(self.main_frame, text="Visualizar Resultado",
                         fg_color="#5E35B1", hover_color="#512DA8",
@@ -105,7 +118,7 @@ class TemplateApp(ctk.CTk):
         #Botão de Editar Template
         ctk.CTkButton(self.main_frame, text="Editar Templates",
                         fg_color="#7E57C2", hover_color="#6A4BB3",
-                        command=self.open_template_editor).grid(row=4, column=0, pady=(5, 10))
+                        command=self.open_template_editor).grid(row=4, column=0, pady=(5, 5))
         #Botão de Adicionar Campo
         self.add_btn = ctk.CTkButton(self.main_frame, text="+ Adicionar Campo", width=150, height=30,
                         command=self.prompt_new_field,
@@ -114,7 +127,7 @@ class TemplateApp(ctk.CTk):
         #Botão de Modo Simples
         ctk.CTkButton(self.main_frame, text="Modo Simples",
                         fg_color="#5E35B1", hover_color="#4527A0",
-                        command=self.open_quick_mode).grid(row=6, column=0, pady=(2, 5))
+                        command=self.open_quick_mode).grid(row=6, column=0, pady=(5, 5))
 
 
     def draw_all_fields(self):
@@ -140,38 +153,38 @@ class TemplateApp(ctk.CTk):
         return len(text) > 15 and " " in text
 
     def _draw_field(self, name, row, value="", is_dynamic=True):
-        row_frame = ctk.CTkFrame(self.form_frame, fg_color="transparent")
-        row_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
-        row_frame.grid_columnconfigure(1, weight=1)  # Apenas a entrada expande
+            row_frame = ctk.CTkFrame(self.form_frame, fg_color="transparent")
+            row_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
+            row_frame.grid_columnconfigure(1, weight=1)  # Apenas a entrada expande
 
-        label = ctk.CTkLabel(
-            row_frame,
-            text=name,
-            anchor="w",
-            justify="left",
-            width=160  # largura fixa para alinhamento
-        )
-        label.grid(row=0, column=0, sticky="w", padx=(0, 5))
+            label = ctk.CTkLabel(
+                row_frame,
+                text=name,
+                anchor="w",
+                justify="left",
+                width=160  # largura fixa para alinhamento
+            )
+            label.grid(row=0, column=0, sticky="w", padx=(0, 5))
 
-        entry = ctk.CTkEntry(row_frame, placeholder_text=f"{name}")
-        entry.insert(0, value)
-        entry.grid(row=0, column=1, sticky="ew")
-        self.entries[name] = entry
-        entry.original_border_color = entry.cget("border_color")  # salvar cor original
-        
+            entry = ctk.CTkEntry(row_frame, placeholder_text=f"{name}")
+            if value not in (None, ""):
+                entry.insert(0, value)
+            entry.grid(row=0, column=1, sticky="ew")
+            self.entries[name] = entry
+            entry.original_border_color = entry.cget("border_color")  # salvar cor original
 
-        if is_dynamic:
-            btn_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
-            btn_frame.grid(row=0, column=2, sticky="e", padx=(5, 0))
+            if is_dynamic:
+                btn_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
+                btn_frame.grid(row=0, column=2, sticky="e", padx=(5, 0))
 
-            up_btn = ctk.CTkButton(btn_frame, text="↑", width=30, command=lambda: self.move_field(name, -1))
-            down_btn = ctk.CTkButton(btn_frame, text="↓", width=30, command=lambda: self.move_field(name, 1))
-            del_btn = ctk.CTkButton(btn_frame, text="✕", width=30, fg_color="#A94444",
-                                    command=lambda: self.remove_field(name))
+                up_btn = ctk.CTkButton(btn_frame, text="↑", width=30, command=lambda: self.move_field(name, -1))
+                down_btn = ctk.CTkButton(btn_frame, text="↓", width=30, command=lambda: self.move_field(name, 1))
+                del_btn = ctk.CTkButton(btn_frame, text="✕", width=30, fg_color="#A94444",
+                                        command=lambda: self.remove_field(name))
 
-            up_btn.pack(side="left", padx=2)
-            down_btn.pack(side="left", padx=2)
-            del_btn.pack(side="left", padx=2)
+                up_btn.pack(side="left", padx=2)
+                down_btn.pack(side="left", padx=2)
+                del_btn.pack(side="left", padx=2)
 
     def move_field(self, field, direction):
         idx = self.dynamic_fields.index(field)
@@ -252,18 +265,30 @@ class TemplateApp(ctk.CTk):
         box.pack(expand=True, fill="both", padx=20, pady=20)
 
     def load_template_placeholders(self):
-        template_content = self.template_manager.get_template(self.current_template)
-        placeholders = self.template_manager.extract_placeholders(template_content)
+            template_content = self.template_manager.get_template(self.current_template)
+            placeholders = self.template_manager.extract_placeholders(template_content)
 
-        # resetar apenas os dinâmicos
-        self.dynamic_fields = [ph for ph in placeholders if ph not in self.fixed_fields]
-        self.draw_all_fields()
+            # SALVAR VALORES EXISTENTES
+            old_values = {k: v.get() for k, v in self.entries.items()}
+
+            # REDEFINIR CAMPOS DINÂMICOS com base no novo template
+            self.dynamic_fields = [ph for ph in placeholders if ph not in self.fixed_fields]
+
+            # RECONSTRUIR OS CAMPOS
+            self.draw_all_fields()
+            # RESTAURAR APENAS VALORES NÃO NULOS/NÃO VAZIOS
+            for k in self.entries:
+                valor_antigo = old_values.get(k, None)
+                if valor_antigo not in (None, ""):
+                    self.entries[k].delete(0, "end")
+                    self.entries[k].insert(0, valor_antigo)
+            # Se não houver valor antigo, deixa vazio para mostrar o placeholder
 
     def open_template_editor(self):
         def get_fields():
             return {
                 "fixed": self.fixed_fields,
-                "dynamic": self.dynamic_fields
+                "dynamic": sorted(self.dynamic_fields)
             }
 
         TemplateEditor(self, self.template_manager, get_fields, current_template=self.current_template)
@@ -353,6 +378,16 @@ class TemplateApp(ctk.CTk):
         self.geometry(f"{current_width}x{new_height}+{x}+{y}")
 
         self.after(delay, lambda: self.animate_resize_to(target_height, step, delay, on_complete))
+
+    def limpar_campos(self):
+        for name, entry in self.entries.items():
+            entry.delete(0, "end")
+            entry.insert(0, "")
+            entry.configure(placeholder_text=name)
+            entry.configure(border_color=entry.original_border_color)
+
+        self.show_snackbar("Campos limpos!", toast_type="info")
+
 
     def pulse_window(self, times=5, offset=3, delay=5):
         x, y = self.winfo_x(), self.winfo_y()

@@ -1,64 +1,76 @@
 import json
 import os
-from datetime import date
+from datetime import date, datetime
 
 class DailyPasswordManager:
     def __init__(self, file_path="config.json"):
         self.file_path = file_path
         self.today = str(date.today())
         self.password = None
+        self._config_cache = None
         self._load_password()
+
+    def _log(self, msg):
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
+
+    def _read_config(self):
+        if self._config_cache is not None:
+            return self._config_cache
+
+        if not os.path.exists(self.file_path):
+            self._log(f"Arquivo de configuração '{self.file_path}' não encontrado. Criando novo.")
+            self._config_cache = {}
+            return self._config_cache
+
+        try:
+            with open(self.file_path, "r", encoding="utf-8") as f:
+                self._config_cache = json.load(f)
+                return self._config_cache
+        except json.JSONDecodeError:
+            self._log(f"Arquivo '{self.file_path}' está corrompido. Substituindo por um novo.")
+            self._config_cache = {}
+            return self._config_cache
+        except Exception as e:
+            self._log(f"Erro ao ler config: {e}")
+            self._config_cache = {}
+            return self._config_cache
+
+    def _write_config(self):
+        try:
+            with open(self.file_path, "w", encoding="utf-8") as f:
+                json.dump(self._config_cache, f, indent=4)
+        except Exception as e:
+            self._log(f"Erro ao salvar config: {e}")
 
     def _load_password(self):
         config = self._read_config()
         dp = config.get("daily_password", {})
 
-        # Se a data for hoje, carrega a senha; se não, limpa
         if dp.get("date") == self.today:
             self.password = dp.get("password")
         else:
-            self._update_config_password(None)  # Reset para hoje
+            # Atualiza somente se necessário
+            config["daily_password"] = {
+                "date": self.today,
+                "password": None
+            }
+            self.password = None
+            self._write_config()
 
     def get_today_password(self):
         return self.password
 
     def set_today_password(self, password):
+        config = self._read_config()
         self.password = password
-        self._update_config_password(password)
+        config["daily_password"] = {
+            "date": self.today,
+            "password": password
+        }
+        self._write_config()
 
     def reset_daily_password(self):
         self.set_today_password(None)
 
-
-    def _read_config(self):
-        if os.path.exists(self.file_path):
-            try:
-                with open(self.file_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"[ERRO ao ler config.json]: {e}")
-                print("A leitura do arquivo de configuração falhou. Por favor, verifique se o arquivo está corrompido ou com permissões corretas.")
-                # Notifica o usuário e retorna None para evitar sobrescrever o arquivo
-                return None
-        else:
-            print(f"[AVISO]: O arquivo de configuração '{self.file_path}' não existe.")
-        return None
-
-
-    def _write_config(self, data):
-        try:
-            with open(self.file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=4)
-        except Exception as e:
-            print(f"[ERRO ao escrever config.json]: {e}")
-
-    def _update_config_password(self, new_password):
-        config = self._read_config()
-        if config is None:
-            print("[ERRO]: Não foi possível atualizar a senha diária porque a configuração não pôde ser lida.")
-            return
-        config["daily_password"] = {
-            "date": self.today,
-            "password": new_password
-        }
-        self._write_config(config)
+    def is_password_set(self):
+        return bool(self.password)
