@@ -71,40 +71,59 @@ class QuickTemplatePopup(ctk.CTkToplevel):
 
 
     def load_template(self, template_name):
-        self.entries.clear()
-        for widget in self.form_frame.winfo_children():
-            widget.destroy()
+            from app import placeholder_engine  # Importa aqui para evitar import circular
 
-        content = self.manager.get_template(template_name)
-        placeholders = self.manager.extract_placeholders(content)
-        used_fields = sorted(placeholders)
+            self.entries.clear()
+            for widget in self.form_frame.winfo_children():
+                widget.destroy()
 
-        for i, field in enumerate(used_fields):
-            label = ctk.CTkLabel(self.form_frame, text=field)
-            label.grid(row=i, column=0, sticky="w", pady=(2, 2))
+            content = self.manager.get_template(template_name)
+            placeholders = self.manager.extract_placeholders(content)
 
-            entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field}")
-            entry.grid(row=i, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
-            self.entries[field] = entry
+            # Filtra placeholders automáticos
+            automatic_placeholders = set(placeholder_engine.handlers.keys())
+            def is_automatic(ph):
+                if ph in automatic_placeholders:
+                    return True
+                if ph == "Agora":
+                    return True
+                if ph.startswith("Agora[") and ph.endswith("]"):
+                    return True
+                return False
 
-        # Ajusta o tamanho da janela com base nos campos
-        new_height = 105 + len(used_fields) * 35
-        self.geometry(f"400x{new_height}")
+            used_fields = sorted([ph for ph in placeholders if not is_automatic(ph)])
+
+            for i, field in enumerate(used_fields):
+                label = ctk.CTkLabel(self.form_frame, text=field)
+                label.grid(row=i, column=0, sticky="w", pady=(2, 2))
+
+                entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field}")
+                entry.grid(row=i, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
+                self.entries[field] = entry
+
+            # Ajusta o tamanho da janela com base nos campos
+            new_height = 105 + len(used_fields) * 35
+            self.geometry(f"400x{new_height}")
 
     def copy_template(self):
-        template_name = self.template_var.get()
-        if not template_name:
-            messagebox.showerror("Erro", "Selecione um template.")
-            return
+            from app import placeholder_engine  # Importa aqui para evitar import circular
 
-        content = self.manager.get_template(template_name)
+            template_name = self.template_var.get()
+            if not template_name:
+                messagebox.showerror("Erro", "Selecione um template.")
+                return
 
-        for key, entry in self.entries.items():
-            value = entry.get()
-            content = content.replace(f"${key}$", value if value else "")
+            content = self.manager.get_template(template_name)
 
-        import pyperclip
-        pyperclip.copy(content)
+            for key, entry in self.entries.items():
+                value = entry.get()
+                content = content.replace(f"${key}$", value if value else "")
+
+            # Substitui placeholders automáticos/dinâmicos
+            content = placeholder_engine.process(content)
+
+            import pyperclip
+            pyperclip.copy(content)
 
     def copy_and_close(self):
         template_name = self.template_var.get()

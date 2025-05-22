@@ -3,6 +3,8 @@ import pyperclip
 import json
 import sys
 import os
+import re
+from datetime import datetime
 from template_editor import TemplateEditor
 from template_manager import TemplateManager
 from theme_manager import ThemeManager
@@ -12,7 +14,7 @@ from customtkinter import CTkInputDialog
 if sys.platform == "win32":
     import ctypes
     try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # SYSTEM_AWARE
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # SYSTEM_AWARE
     except Exception as e:
         print(f"[DPI WARNING] Could not set DPI awareness: {e}")
 
@@ -226,63 +228,83 @@ class TemplateApp(ctk.CTk):
             self.show_snackbar("PIN desativado!", toast_type="info")
 
     def copy_template(self):
-        template = self.template_manager.get_template(self.current_template)
-        tem_vazios = False
+            template = self.template_manager.get_template(self.current_template)
+            tem_vazios = False
 
-        for key, entry in self.entries.items():
-            value = entry.get()
-            if not value:
-                entry.configure(border_color="red")
-                entry.bind("<FocusIn>", lambda e, ent=entry: ent.configure(border_color=ent.original_border_color))
-                entry.bind("<FocusOut>", lambda e, ent=entry: self.animate_field_success(ent) if ent.get() else None)
+            for key, entry in self.entries.items():
+                value = entry.get()
+                if not value:
+                    entry.configure(border_color="red")
+                    entry.bind("<FocusIn>", lambda e, ent=entry: ent.configure(border_color=ent.original_border_color))
+                    entry.bind("<FocusOut>", lambda e, ent=entry: self.animate_field_success(ent) if ent.get() else None)
+                    tem_vazios = True
+                template = template.replace(f"${key}$", value if value else "")
 
-                tem_vazios = True
-            template = template.replace(f"${key}$", value if value else "")
+            # Substitui placeholders dinâmicos
+            template = placeholder_engine.process(template)
 
-        pyperclip.copy(template)
-        self.pulse_window()
-        self.show_snackbar("Copiado com sucesso!", toast_type="success")
+            pyperclip.copy(template)
+            self.pulse_window()
+            self.show_snackbar("Copiado com sucesso!", toast_type="success")
 
-        if tem_vazios:
-            self.show_snackbar("Existem campos em branco!", toast_type="warning")
+            if tem_vazios:
+                self.show_snackbar("Existem campos em branco!", toast_type="warning")
 
 
     def preview_template(self):
-        template = self.template_manager.get_template(self.current_template)
-        for key, entry in self.entries.items():
-            value = entry.get()
-            template = template.replace(f"${key}$", value if value else "")
+            template = self.template_manager.get_template(self.current_template)
+            for key, entry in self.entries.items():
+                value = entry.get()
+                template = template.replace(f"${key}$", value if value else "")
 
-        preview = ctk.CTkToplevel(self)
-        preview.title("Visualização do Template")
-        preview.geometry("600x400")
-        preview.transient(self)
-        preview.grab_set()
+            # Substitui placeholders dinâmicos
+            template = placeholder_engine.process(template)
 
-        box = ctk.CTkTextbox(preview, wrap="word")
-        box.insert("1.0", template)
-        box.configure(state="disabled")
-        box.pack(expand=True, fill="both", padx=20, pady=20)
+            preview = ctk.CTkToplevel(self)
+            preview.title("Visualização do Template")
+            preview.geometry("600x400")
+            preview.transient(self)
+            preview.grab_set()
+
+            box = ctk.CTkTextbox(preview, wrap="word")
+            box.insert("1.0", template)
+            box.configure(state="disabled")
+            box.pack(expand=True, fill="both", padx=20, pady=20)
 
     def load_template_placeholders(self):
-            template_content = self.template_manager.get_template(self.current_template)
-            placeholders = self.template_manager.extract_placeholders(template_content)
+                template_content = self.template_manager.get_template(self.current_template)
+                placeholders = self.template_manager.extract_placeholders(template_content)
 
-            # SALVAR VALORES EXISTENTES
-            old_values = {k: v.get() for k, v in self.entries.items()}
+                # SALVAR VALORES EXISTENTES
+                old_values = {k: v.get() for k, v in self.entries.items()}
 
-            # REDEFINIR CAMPOS DINÂMICOS com base no novo template
-            self.dynamic_fields = [ph for ph in placeholders if ph not in self.fixed_fields]
+                # Filtra placeholders automáticos (handlers do PlaceholderEngine)
+                automatic_placeholders = set(placeholder_engine.handlers.keys())
+                # Também filtra placeholders do tipo $Agora[...]$
+                def is_automatic(ph):
+                    if ph in automatic_placeholders:
+                        return True
+                    if ph == "Agora":
+                        return True
+                    if ph.startswith("Agora[") and ph.endswith("]"):
+                        return True
+                    return False
+                # REDEFINIR CAMPOS DINÂMICOS com base no novo template
+                self.dynamic_fields = [
+                    ph for ph in placeholders
+                    if ph not in self.fixed_fields and not is_automatic(ph)
+                ]
 
-            # RECONSTRUIR OS CAMPOS
-            self.draw_all_fields()
-            # RESTAURAR APENAS VALORES NÃO NULOS/NÃO VAZIOS
-            for k in self.entries:
-                valor_antigo = old_values.get(k, None)
-                if valor_antigo not in (None, ""):
-                    self.entries[k].delete(0, "end")
-                    self.entries[k].insert(0, valor_antigo)
-            # Se não houver valor antigo, deixa vazio para mostrar o placeholder
+                # RECONSTRUIR OS CAMPOS
+                self.draw_all_fields()
+                # RESTAURAR APENAS VALORES NÃO NULOS/NÃO VAZIOS
+                for k in self.entries:
+                    valor_antigo = old_values.get(k, None)
+                    if valor_antigo not in (None, ""):
+                        self.entries[k].delete(0, "end")
+                        self.entries[k].insert(0, valor_antigo)
+                # Se não houver valor antigo, deixa vazio para mostrar o placeholder
+
 
     def open_template_editor(self):
         def get_fields():
@@ -528,6 +550,49 @@ class TemplateApp(ctk.CTk):
         self.update_idletasks()  # Garante que a geometria seja a real
         self.save_window_config()
         self.destroy()
+
+class PlaceholderEngine:
+    def __init__(self):
+        self.handlers = {}
+
+    def register_handler(self, name, func):
+        self.handlers[name] = func
+
+    def process(self, text):
+            def replacer(match):
+                ph = match.group(1)
+                # Handler customizado: $Agora[formato]$ ou $Agora$
+                if ph == "Agora":
+                    # Formato padrão para $Agora$
+                    fmt = "%H:%M"
+                    try:
+                        return datetime.now().strftime(fmt)
+                    except Exception:
+                        return match.group(0)
+                if ph.startswith("Agora[") and ph.endswith("]"):
+                    fmt = ph[6:-1]
+                    try:
+                        return datetime.now().strftime(fmt)
+                    except Exception:
+                        return match.group(0)
+                # Handler padrão
+                handler = self.handlers.get(ph)
+                if handler:
+                    return handler()
+                return match.group(0)
+            # Regex: $Nome$ ou $Agora[...formato...]$ ou $Agora$
+            return re.sub(r"\$([a-zA-Z0-9 _\-çÇáéíóúãõâêîôûÀ-ÿ\[\]%:/]+)\$", replacer, text)
+
+
+# Instância global da engine
+placeholder_engine = PlaceholderEngine()
+# Handlers padrões
+placeholder_engine.register_handler("Hoje", lambda: datetime.now().strftime("%d/%m/%Y"))
+placeholder_engine.register_handler("DiaSem", lambda: datetime.now().strftime("%A"))
+placeholder_engine.register_handler("HoraMin", lambda: datetime.now().strftime("%H:%M"))
+placeholder_engine.register_handler("HoraMinSeg", lambda: datetime.now().strftime("%H:%M:%S"))
+
+
 
 if __name__ == "__main__":
     app = TemplateApp()
