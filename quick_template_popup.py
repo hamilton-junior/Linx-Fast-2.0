@@ -72,6 +72,8 @@ class QuickTemplatePopup(ctk.CTkToplevel):
 
     def load_template(self, template_name):
             from app import placeholder_engine  # Importa aqui para evitar import circular
+            import json
+            import os
 
             self.entries.clear()
             for widget in self.form_frame.winfo_children():
@@ -91,7 +93,36 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                     return True
                 return False
 
-            used_fields = sorted([ph for ph in placeholders if not is_automatic(ph)])
+            # --- ORDEM PERSISTENTE DOS CAMPOS DINÂMICOS ---
+            # Tenta carregar ordem salva do config.json
+            fixed_fields = [
+                "Nome", "Problema Relatado", "CNPJ",
+                "Telefone", "Email", "Protocolo", "Procedimento Executado"
+            ]
+            # Se quiser manter sincronizado com o app principal, pode importar de lá
+
+            # Separa placeholders em fixos e dinâmicos
+            fixed_present = [ph for ph in fixed_fields if ph in placeholders]
+            dynamic_fields = [ph for ph in placeholders if ph not in fixed_fields and not is_automatic(ph)]
+
+            order = None
+            config_path = "config.json"
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+                    field_orders = config.get("field_orders", {})
+                    order = field_orders.get(template_name)
+                except Exception:
+                    order = None
+            if order:
+                # Garante que só mantenha campos realmente presentes no template
+                dynamic_ordered = [f for f in order if f in dynamic_fields] + [f for f in dynamic_fields if f not in order]
+            else:
+                dynamic_ordered = dynamic_fields
+
+            # Campos fixos sempre primeiro, na ordem padrão, depois os dinâmicos na ordem salva
+            used_fields = fixed_present + dynamic_ordered
 
             for i, field in enumerate(used_fields):
                 label = ctk.CTkLabel(self.form_frame, text=field)

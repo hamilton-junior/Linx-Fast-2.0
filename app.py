@@ -188,17 +188,54 @@ class TemplateApp(ctk.CTk):
                 down_btn.pack(side="left", padx=2)
                 del_btn.pack(side="left", padx=2)
 
+    def save_field_order(self):
+        """Salva a ordem dos campos dinâmicos do template atual no arquivo config.json."""
+        try:
+            if os.path.exists("config.json"):
+                with open("config.json", "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            else:
+                config = {}
+
+            if "field_orders" not in config:
+                config["field_orders"] = {}
+
+            config["field_orders"][self.current_template] = self.dynamic_fields
+
+            with open("config.json", "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4)
+        except Exception as e:
+            print(f"[ERRO ao salvar ordem dos campos]: {e}")
+
+    def load_field_order(self):
+        """Carrega a ordem dos campos dinâmicos do template atual, se existir."""
+        try:
+            if os.path.exists("config.json"):
+                with open("config.json", "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                field_orders = config.get("field_orders", {})
+                order = field_orders.get(self.current_template)
+                if order:
+                    # Garante que só mantenha campos realmente presentes no template
+                    self.dynamic_fields = [f for f in order if f in self.dynamic_fields] + [f for f in self.dynamic_fields if f not in order]
+        except Exception as e:
+            print(f"[ERRO ao carregar ordem dos campos]: {e}")
+
+
+
     def move_field(self, field, direction):
-        idx = self.dynamic_fields.index(field)
-        new_idx = idx + direction
-        if 0 <= new_idx < len(self.dynamic_fields):
-            self.dynamic_fields[idx], self.dynamic_fields[new_idx] = self.dynamic_fields[new_idx], self.dynamic_fields[idx]
-            self.draw_all_fields()
+            idx = self.dynamic_fields.index(field)
+            new_idx = idx + direction
+            if 0 <= new_idx < len(self.dynamic_fields):
+                self.dynamic_fields[idx], self.dynamic_fields[new_idx] = self.dynamic_fields[new_idx], self.dynamic_fields[idx]
+                self.draw_all_fields()
+                self.save_field_order()
 
     def remove_field(self, field):
         if field in self.dynamic_fields:
             self.dynamic_fields.remove(field)
             self.draw_all_fields()
+            self.save_field_order()
 
     def prompt_new_field(self):
         popup = CTkInputDialog(text="Nome do novo campo (placeholder):", title="Adicionar Campo")
@@ -206,6 +243,7 @@ class TemplateApp(ctk.CTk):
         if field_name and field_name not in self.entries:
             self.dynamic_fields.append(field_name)
             self.draw_all_fields()
+            self.save_field_order()
 
     def focus_next_field(self, current_name):
         keys = list(self.entries.keys())
@@ -228,10 +266,21 @@ class TemplateApp(ctk.CTk):
             self.show_snackbar("PIN desativado!", toast_type="info")
 
     def copy_template(self):
+            # Validate if a template is selected
+            if not self.current_template or self.current_template == "Selecione o template...":
+                self.show_snackbar("Selecione um template antes de copiar!", toast_type="error")
+                return
+
             template = self.template_manager.get_template(self.current_template)
             tem_vazios = False
 
-            for key, entry in self.entries.items():
+            # Descobre quais campos realmente estão no template atual
+            placeholders = set(self.template_manager.extract_placeholders(template))
+            # Filtra apenas os campos presentes no template e que estão na interface
+            fields_to_validate = [k for k in self.entries if k in placeholders]
+
+            for key in fields_to_validate:
+                entry = self.entries[key]
                 value = entry.get()
                 if not value:
                     entry.configure(border_color="red")
@@ -249,6 +298,8 @@ class TemplateApp(ctk.CTk):
 
             if tem_vazios:
                 self.show_snackbar("Existem campos em branco!", toast_type="warning")
+
+
 
 
     def preview_template(self):
@@ -272,38 +323,44 @@ class TemplateApp(ctk.CTk):
             box.pack(expand=True, fill="both", padx=20, pady=20)
 
     def load_template_placeholders(self):
-                template_content = self.template_manager.get_template(self.current_template)
-                placeholders = self.template_manager.extract_placeholders(template_content)
+        template_content = self.template_manager.get_template(self.current_template)
+        placeholders = self.template_manager.extract_placeholders(template_content)
 
-                # SALVAR VALORES EXISTENTES
-                old_values = {k: v.get() for k, v in self.entries.items()}
+        # SALVAR VALORES EXISTENTES
+        old_values = {k: v.get() for k, v in self.entries.items()}
 
-                # Filtra placeholders automáticos (handlers do PlaceholderEngine)
-                automatic_placeholders = set(placeholder_engine.handlers.keys())
-                # Também filtra placeholders do tipo $Agora[...]$
-                def is_automatic(ph):
-                    if ph in automatic_placeholders:
-                        return True
-                    if ph == "Agora":
-                        return True
-                    if ph.startswith("Agora[") and ph.endswith("]"):
-                        return True
-                    return False
-                # REDEFINIR CAMPOS DINÂMICOS com base no novo template
-                self.dynamic_fields = [
-                    ph for ph in placeholders
-                    if ph not in self.fixed_fields and not is_automatic(ph)
-                ]
+        # Filtra placeholders automáticos (handlers do PlaceholderEngine)
+        automatic_placeholders = set(placeholder_engine.handlers.keys())
+        # Também filtra placeholders do tipo $Agora[...]$
+        def is_automatic(ph):
+            if ph in automatic_placeholders:
+                return True
+            if ph == "Agora":
+                return True
+            if ph.startswith("Agora[") and ph.endswith("]"):
+                return True
+            return False
+        # REDEFINIR CAMPOS DINÂMICOS com base no novo template
+        self.dynamic_fields = [
+            ph for ph in placeholders
+            if ph not in self.fixed_fields and not is_automatic(ph)
+        ]
 
-                # RECONSTRUIR OS CAMPOS
-                self.draw_all_fields()
-                # RESTAURAR APENAS VALORES NÃO NULOS/NÃO VAZIOS
-                for k in self.entries:
-                    valor_antigo = old_values.get(k, None)
-                    if valor_antigo not in (None, ""):
-                        self.entries[k].delete(0, "end")
-                        self.entries[k].insert(0, valor_antigo)
-                # Se não houver valor antigo, deixa vazio para mostrar o placeholder
+        # Carrega ordem persistida, se houver
+        if hasattr(self, "load_field_order") and callable(self.load_field_order):
+            self.load_field_order()
+
+        # RECONSTRUIR OS CAMPOS
+        self.draw_all_fields()
+        # RESTAURAR APENAS VALORES NÃO NULOS/NÃO VAZIOS
+        for k in self.entries:
+            valor_antigo = old_values.get(k, None)
+            if valor_antigo not in (None, ""):
+                self.entries[k].delete(0, "end")
+                self.entries[k].insert(0, valor_antigo)
+        # Se não houver valor antigo, deixa vazio para mostrar o placeholder
+
+
 
 
     def open_template_editor(self):
@@ -552,6 +609,11 @@ class TemplateApp(ctk.CTk):
         self.destroy()
 
 class PlaceholderEngine:
+    """
+    Manages dynamic placeholder substitution in text templates.
+
+    Allows registration of custom handlers for placeholders and provides built-in support for date/time placeholders like $Agora$ and $Agora[formato]$.
+    """
     def __init__(self):
         self.handlers = {}
 
@@ -583,14 +645,61 @@ class PlaceholderEngine:
             # Regex: $Nome$ ou $Agora[...formato...]$ ou $Agora$
             return re.sub(r"\$([a-zA-Z0-9 _\-çÇáéíóúãõâêîôûÀ-ÿ\[\]%:/]+)\$", replacer, text)
 
+    def save_field_order(self):
+        """Salva a ordem dos campos dinâmicos do template atual no arquivo config.json."""
+        try:
+            if os.path.exists("config.json"):
+                with open("config.json", "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            else:
+                config = {}
+
+            if "field_orders" not in config:
+                config["field_orders"] = {}
+
+            config["field_orders"][self.current_template] = self.dynamic_fields
+
+            with open("config.json", "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4)
+        except Exception as e:
+            print(f"[ERRO ao salvar ordem dos campos]: {e}")
+
+    def load_field_order(self):
+        """Carrega a ordem dos campos dinâmicos do template atual, se existir."""
+        try:
+            if os.path.exists("config.json"):
+                with open("config.json", "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                field_orders = config.get("field_orders", {})
+                order = field_orders.get(self.current_template)
+                if order:
+                    # Garante que só mantenha campos realmente presentes no template
+                    self.dynamic_fields = [f for f in order if f in self.dynamic_fields] + [f for f in self.dynamic_fields if f not in order]
+        except Exception as e:
+            print(f"[ERRO ao carregar ordem dos campos]: {e}")
+
 
 # Instância global da engine
 placeholder_engine = PlaceholderEngine()
 # Handlers padrões
 placeholder_engine.register_handler("Hoje", lambda: datetime.now().strftime("%d/%m/%Y"))
-placeholder_engine.register_handler("DiaSem", lambda: datetime.now().strftime("%A"))
-placeholder_engine.register_handler("HoraMin", lambda: datetime.now().strftime("%H:%M"))
-placeholder_engine.register_handler("HoraMinSeg", lambda: datetime.now().strftime("%H:%M:%S"))
+DIAS_SEMANA_PT = {
+    "Monday": "segunda-feira",
+    "Tuesday": "terça-feira",
+    "Wednesday": "quarta-feira",
+    "Thursday": "quinta-feira",
+    "Friday": "sexta-feira",
+    "Saturday": "sábado",
+    "Sunday": "domingo"
+}
+
+placeholder_engine.register_handler(
+    "DiaSemana",
+    lambda: DIAS_SEMANA_PT.get(datetime.now().strftime("%A"), datetime.now().strftime("%A"))
+)
+placeholder_engine.register_handler("HoraMinuto", lambda: datetime.now().strftime("%H:%M"))
+placeholder_engine.register_handler("HoraMinutoSegundo", lambda: datetime.now().strftime("%H:%M:%S"))
+
 
 
 
