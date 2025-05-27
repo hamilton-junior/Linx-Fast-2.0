@@ -194,12 +194,16 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                     if isinstance(current_widget, ctk.CTkTextbox):
                         return
                     val = current_widget.get()
+                    current_border_color = current_widget.cget("border_color")
                     current_widget.grid_forget()
-                    textbox = ctk.CTkTextbox(self.form_frame, height=60, wrap="word")
+                    textbox = ctk.CTkTextbox(self.form_frame, height=60, wrap="word", border_width=2)
                     if val:
                         textbox.insert("1.0", val)
                     textbox.grid(row=row_idx, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
                     self.entries[field_name] = textbox
+                    # Aplica a mesma cor de borda do entry ao textbox APÓS grid
+                    textbox.after(1, lambda: textbox.configure(border_color=current_border_color))
+                    textbox.border_color = current_border_color
                     textbox.focus()
                     textbox.bind("<FocusOut>", lambda e, fn=field_name, r=row_idx: to_entry(e, fn, r))
 

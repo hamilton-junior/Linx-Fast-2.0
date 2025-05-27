@@ -208,18 +208,18 @@ class TemplateApp(ctk.CTk):
                 if isinstance(current_widget, ctk.CTkTextbox):
                     return
                 val = current_widget.get()
-                # Detecta se o entry estava com borda vermelha
-                was_red = getattr(current_widget, "border_color", None) == "red"
+                # Captura a cor da borda atual do entry
+                current_border_color = current_widget.cget("border_color")
                 current_widget.grid_forget()
-                textbox = ctk.CTkTextbox(row_frame, height=60, wrap="word")
+                textbox = ctk.CTkTextbox(row_frame, height=60, wrap="word", border_width=2)
                 if val:
                     textbox.insert("1.0", val)
                 textbox.grid(row=0, column=1, sticky="ew")
                 textbox.original_border_color = textbox.cget("border_color")
-                if was_red:
-                    textbox.configure(border_color="red")
-                    textbox.border_color = "red"
                 self.entries[field_name] = textbox
+                # Aplica a mesma cor de borda do entry ao textbox APÓS grid
+                textbox.after(1, lambda: textbox.configure(border_color=current_border_color))
+                textbox.border_color = current_border_color
                 textbox.focus()
                 textbox.bind("<FocusOut>", lambda e, fn=field_name: to_entry(e, fn))
 
@@ -252,20 +252,65 @@ class TemplateApp(ctk.CTk):
                 mode = self.fixed_field_modes.get(name, "entry")
 
             def toggle_fixed_field_mode(event=None, field_name=name):
-                current = self.fixed_field_modes.get(field_name, "entry")
-                self.fixed_field_modes[field_name] = "textbox" if current == "entry" else "entry"
-                self.draw_all_fields()
+                # Troca apenas o widget do campo clicado, sem redesenhar tudo
+                current_widget = self.entries[field_name]
+                row_frame = current_widget.master
+                label = row_frame.grid_slaves(row=0, column=0)[0]
+                # Salva valor e cor da borda ANTES de destruir o widget
+                if isinstance(current_widget, ctk.CTkEntry):
+                    val = current_widget.get()
+                    current_border_color = current_widget.cget("border_color")
+                elif isinstance(current_widget, ctk.CTkTextbox):
+                    val = current_widget.get("1.0", "end-1c")
+                    current_border_color = current_widget.cget("border_color")
+                else:
+                    val = ""
+                    current_border_color = "#3a3a3a"
+                # Agora sim, remove e destrói todos os widgets da coluna 1
+                for widget in row_frame.grid_slaves(row=0, column=1):
+                    widget.grid_forget()
+                    widget.destroy()
+                # Alterna entre Entry e Textbox
+                if isinstance(current_widget, ctk.CTkEntry):
+                    textbox = ctk.CTkTextbox(row_frame, height=60, wrap="word", border_width=2)
+                    if val:
+                        textbox.insert("1.0", val)
+                    textbox.grid(row=0, column=1, sticky="ew")
+                    textbox.original_border_color = textbox.cget("border_color")
+                    textbox.configure(border_color=current_border_color)
+                    textbox.border_color = current_border_color
+                    self.entries[field_name] = textbox
+                    # Remove binds antigos e adiciona apenas um bind para voltar para entry
+                    label.unbind("<Button-3>")
+                    label.bind("<Button-3>", lambda e, fn=field_name: toggle_fixed_field_mode(e, fn))
+                elif isinstance(current_widget, ctk.CTkTextbox):
+                    entry = ctk.CTkEntry(row_frame, placeholder_text=f"{field_name}")
+                    if val:
+                        entry.insert(0, val)
+                    entry.grid(row=0, column=1, sticky="ew")
+                    entry.original_border_color = entry.cget("border_color")
+                    entry.configure(border_color=current_border_color)
+                    entry.border_color = current_border_color
+                    self.entries[field_name] = entry
+                    # Remove binds antigos e adiciona apenas um bind para ir para textbox
+                    label.unbind("<Button-3>")
+                    label.bind("<Button-3>", lambda e, fn=field_name: toggle_fixed_field_mode(e, fn))
 
             if not is_dynamic:
                 label.bind("<Button-3>", toggle_fixed_field_mode)
 
+            # Inicialização padrão (Entry ou Textbox)
             if not is_dynamic and mode == "textbox":
-                textbox = ctk.CTkTextbox(row_frame, height=60, wrap="word")
+                entry = ctk.CTkEntry(row_frame, placeholder_text=f"{name}")
                 if value not in (None, ""):
-                    textbox.insert("1.0", value)
-                textbox.grid(row=0, column=1, sticky="ew")
-                textbox.original_border_color = textbox.cget("border_color")
-                self.entries[name] = textbox
+                    entry.insert(0, value)
+                entry.grid(row=0, column=1, sticky="ew")
+                entry.original_border_color = entry.cget("border_color")
+                self.entries[name] = entry
+                entry.configure(border_color=entry.original_border_color)
+                entry.border_color = entry.original_border_color
+                # Troca imediatamente para textbox
+                toggle_fixed_field_mode(None, name)
             else:
                 entry = ctk.CTkEntry(row_frame, placeholder_text=f"{name}")
                 if value not in (None, ""):
@@ -273,6 +318,8 @@ class TemplateApp(ctk.CTk):
                 entry.grid(row=0, column=1, sticky="ew")
                 self.entries[name] = entry
                 entry.original_border_color = entry.cget("border_color")
+                entry.configure(border_color=entry.original_border_color)
+                entry.border_color = entry.original_border_color
 
         if is_dynamic:
             btn_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
@@ -382,6 +429,9 @@ class TemplateApp(ctk.CTk):
 
         for key in fields_to_validate:
             entry = self.entries[key]
+            # Garante que o widget ainda existe antes de usar .get()
+            if not entry.winfo_exists():
+                continue
             # Corrige: trata Entry e Textbox de forma robusta
             if isinstance(entry, ctk.CTkTextbox):
                 value = entry.get("1.0", "end-1c")
@@ -643,7 +693,7 @@ class TemplateApp(ctk.CTk):
         styles = {
             "success": {"fg": "#388E3C", "icon": "✔"},
             "error": {"fg": "#D32F2F", "icon": "✖"},
-            "warning": {"fg": "#FBC02D", "icon": "⚠"},
+            "warning": {"fg": "#D4A326", "icon": "⚠"},
             "info": {"fg": "#1976D2", "icon": "ℹ"},
             "default": {"fg": "#AE00FF", "icon": "•"},
         }
