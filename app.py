@@ -210,7 +210,10 @@ class TemplateApp(ctk.CTk):
                 val = current_widget.get()
                 # Captura a cor da borda atual do entry
                 current_border_color = current_widget.cget("border_color")
+                # Captura a cor da borda atual do entry
+                current_border_color = current_widget.cget("border_color")
                 current_widget.grid_forget()
+                textbox = ctk.CTkTextbox(row_frame, height=60, wrap="word", border_width=2)
                 textbox = ctk.CTkTextbox(row_frame, height=60, wrap="word", border_width=2)
                 if val:
                     textbox.insert("1.0", val)
@@ -220,8 +223,13 @@ class TemplateApp(ctk.CTk):
                 # Aplica a mesma cor de borda do entry ao textbox APÓS grid
                 textbox.after(1, lambda: textbox.configure(border_color=current_border_color))
                 textbox.border_color = current_border_color
+                # Aplica a mesma cor de borda do entry ao textbox APÓS grid
+                textbox.after(1, lambda: textbox.configure(border_color=current_border_color))
+                textbox.border_color = current_border_color
                 textbox.focus()
                 textbox.bind("<FocusOut>", lambda e, fn=field_name: to_entry(e, fn))
+                # Redimensiona a janela para manter botões visíveis
+                self.adjust_window_height()
 
 
             def to_entry(event, field_name=name):
@@ -283,6 +291,8 @@ class TemplateApp(ctk.CTk):
                     # Remove binds antigos e adiciona apenas um bind para voltar para entry
                     label.unbind("<Button-3>")
                     label.bind("<Button-3>", lambda e, fn=field_name: toggle_fixed_field_mode(e, fn))
+                    # Redimensiona a janela para manter botões visíveis
+                    self.adjust_window_height()
                 elif isinstance(current_widget, ctk.CTkTextbox):
                     entry = ctk.CTkEntry(row_frame, placeholder_text=f"{field_name}")
                     if val:
@@ -295,14 +305,26 @@ class TemplateApp(ctk.CTk):
                     # Remove binds antigos e adiciona apenas um bind para ir para textbox
                     label.unbind("<Button-3>")
                     label.bind("<Button-3>", lambda e, fn=field_name: toggle_fixed_field_mode(e, fn))
+                    # Redimensiona a janela para manter botões visíveis
+                    self.adjust_window_height()
 
             if not is_dynamic:
                 label.bind("<Button-3>", toggle_fixed_field_mode)
 
             # Inicialização padrão (Entry ou Textbox)
+            # Inicialização padrão (Entry ou Textbox)
             if not is_dynamic and mode == "textbox":
                 entry = ctk.CTkEntry(row_frame, placeholder_text=f"{name}")
+                entry = ctk.CTkEntry(row_frame, placeholder_text=f"{name}")
                 if value not in (None, ""):
+                    entry.insert(0, value)
+                entry.grid(row=0, column=1, sticky="ew")
+                entry.original_border_color = entry.cget("border_color")
+                self.entries[name] = entry
+                entry.configure(border_color=entry.original_border_color)
+                entry.border_color = entry.original_border_color
+                # Troca imediatamente para textbox
+                toggle_fixed_field_mode(None, name)
                     entry.insert(0, value)
                 entry.grid(row=0, column=1, sticky="ew")
                 entry.original_border_color = entry.cget("border_color")
@@ -318,6 +340,8 @@ class TemplateApp(ctk.CTk):
                 entry.grid(row=0, column=1, sticky="ew")
                 self.entries[name] = entry
                 entry.original_border_color = entry.cget("border_color")
+                entry.configure(border_color=entry.original_border_color)
+                entry.border_color = entry.original_border_color
                 entry.configure(border_color=entry.original_border_color)
                 entry.border_color = entry.original_border_color
 
@@ -429,6 +453,9 @@ class TemplateApp(ctk.CTk):
 
         for key in fields_to_validate:
             entry = self.entries[key]
+            # Garante que o widget ainda existe antes de usar .get()
+            if not entry.winfo_exists():
+                continue
             # Garante que o widget ainda existe antes de usar .get()
             if not entry.winfo_exists():
                 continue
@@ -693,6 +720,7 @@ class TemplateApp(ctk.CTk):
         styles = {
             "success": {"fg": "#388E3C", "icon": "✔"},
             "error": {"fg": "#D32F2F", "icon": "✖"},
+            "warning": {"fg": "#D4A326", "icon": "⚠"},
             "warning": {"fg": "#D4A326", "icon": "⚠"},
             "info": {"fg": "#1976D2", "icon": "ℹ"},
             "default": {"fg": "#AE00FF", "icon": "•"},
