@@ -41,6 +41,7 @@ class TemplateApp(ctk.CTk):
         self.dynamic_fields = []
         self.entries = {}
         self.field_widgets = {}
+        self.fixed_field_modes = {}  # Novo: modo de cada campo fixo ("entry" ou "textbox")
 
         self.current_template = "Selecione o template..."
         self.current_template_display = ctk.StringVar(value=self.template_manager.meta.get_display_name(self.current_template))
@@ -103,11 +104,15 @@ class TemplateApp(ctk.CTk):
             fg_color="#A94444",
             hover_color="#912F2F",
             anchor="right",
-            width=1,
+            width=3,
             height=30,
             command=self.limpar_campos
         )
         self.btn_limpar_campos.grid(row=2, column=0, pady=(5, 0), sticky="e")
+        # Tooltip para o botão de limpar campos
+        self.create_tooltip(self.btn_limpar_campos, "Limpar todos os campos", fg_color="#A94444")
+
+
 
         #Botão de Copiar Template
         ctk.CTkButton(self.main_frame, text="Copiar para área de transferência",
@@ -131,9 +136,29 @@ class TemplateApp(ctk.CTk):
                         fg_color="#5E35B1", hover_color="#4527A0",
                         command=self.open_quick_mode).grid(row=6, column=0, pady=(5, 5))
 
+        # --- Label de Créditos do Autor ---
+        label_autor = ctk.CTkLabel(
+            self.main_frame,
+            text="By Hamilton Junior",
+            font=ctk.CTkFont(size=10, slant="italic"),
+            text_color="#888888",
+            anchor="center"
+        )
+        label_autor.grid(row=100, column=0, sticky="ew", pady=(8, 2), padx=0)
+        self.main_frame.grid_rowconfigure(100, weight=0)
+
 
     def draw_all_fields(self):
-        old_values = {k: v.get() for k, v in self.entries.items()}
+        # Salva valores antigos, tanto de Entry quanto de Textbox
+        old_values = {}
+        for k, v in self.entries.items():
+            try:
+                old_values[k] = v.get()
+            except Exception:
+                try:
+                    old_values[k] = v.get("1.0", "end-1c")
+                except Exception:
+                    old_values[k] = ""
 
         for widget in self.form_frame.winfo_children():
             widget.destroy()
@@ -147,7 +172,7 @@ class TemplateApp(ctk.CTk):
         for field in self.dynamic_fields:
             self._draw_field(field, row, old_values.get(field, ""), is_dynamic=True)
             row += 1
-            
+
         self.after(100, self.adjust_window_height)
 
 
@@ -155,38 +180,114 @@ class TemplateApp(ctk.CTk):
         return len(text) > 15 and " " in text
 
     def _draw_field(self, name, row, value="", is_dynamic=True):
-            row_frame = ctk.CTkFrame(self.form_frame, fg_color="transparent")
-            row_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
-            row_frame.grid_columnconfigure(1, weight=1)  # Apenas a entrada expande
+        row_frame = ctk.CTkFrame(self.form_frame, fg_color="transparent")
+        row_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
+        row_frame.grid_columnconfigure(1, weight=1)  # Apenas a entrada expande
 
-            label = ctk.CTkLabel(
-                row_frame,
-                text=name,
-                anchor="w",
-                justify="left",
-                width=160  # largura fixa para alinhamento
-            )
-            label.grid(row=0, column=0, sticky="w", padx=(0, 5))
+        # LABEL (sempre igual)
+        label = ctk.CTkLabel(
+            row_frame,
+            text=name,
+            anchor="w",
+            justify="left",
+            width=160  # largura fixa para alinhamento
+        )
+        label.grid(row=0, column=0, sticky="w", padx=(0, 5))
 
+        # --- Apenas para "Procedimento Executado": alterna Entry/Textbox conforme foco ---
+        if name == "Procedimento Executado":
             entry = ctk.CTkEntry(row_frame, placeholder_text=f"{name}")
             if value not in (None, ""):
                 entry.insert(0, value)
             entry.grid(row=0, column=1, sticky="ew")
+            entry.original_border_color = entry.cget("border_color")
             self.entries[name] = entry
-            entry.original_border_color = entry.cget("border_color")  # salvar cor original
 
-            if is_dynamic:
-                btn_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
-                btn_frame.grid(row=0, column=2, sticky="e", padx=(5, 0))
+            def to_textbox(event, field_name=name):
+                current_widget = self.entries[field_name]
+                if isinstance(current_widget, ctk.CTkTextbox):
+                    return
+                val = current_widget.get()
+                # Detecta se o entry estava com borda vermelha
+                was_red = getattr(current_widget, "border_color", None) == "red"
+                current_widget.grid_forget()
+                textbox = ctk.CTkTextbox(row_frame, height=60, wrap="word")
+                if val:
+                    textbox.insert("1.0", val)
+                textbox.grid(row=0, column=1, sticky="ew")
+                textbox.original_border_color = textbox.cget("border_color")
+                if was_red:
+                    textbox.configure(border_color="red")
+                    textbox.border_color = "red"
+                self.entries[field_name] = textbox
+                textbox.focus()
+                textbox.bind("<FocusOut>", lambda e, fn=field_name: to_entry(e, fn))
 
-                up_btn = ctk.CTkButton(btn_frame, text="↑", width=30, command=lambda: self.move_field(name, -1))
-                down_btn = ctk.CTkButton(btn_frame, text="↓", width=30, command=lambda: self.move_field(name, 1))
-                del_btn = ctk.CTkButton(btn_frame, text="✕", width=30, fg_color="#A94444",
-                                        command=lambda: self.remove_field(name))
 
-                up_btn.pack(side="left", padx=2)
-                down_btn.pack(side="left", padx=2)
-                del_btn.pack(side="left", padx=2)
+            def to_entry(event, field_name=name):
+                current_widget = self.entries[field_name]
+                if not isinstance(current_widget, ctk.CTkTextbox):
+                    return
+                val = current_widget.get("1.0", "end-1c")
+                current_widget.grid_forget()
+                entry = ctk.CTkEntry(row_frame, placeholder_text=f"{field_name}")
+                if val:
+                    entry.insert(0, val)
+                # Se não houver valor, deixa vazio para mostrar o placeholder
+                entry.grid(row=0, column=1, sticky="ew")
+                entry.original_border_color = entry.cget("border_color")
+                self.entries[field_name] = entry
+                entry.bind("<FocusIn>", lambda e, fn=field_name: to_textbox(e, fn))
+                # Se o valor não está vazio e a borda estava vermelha, anima sucesso
+                if val and getattr(current_widget, "border_color", None) == "red":
+                    self.animate_field_success(entry)
+
+            entry.bind("<FocusIn>", lambda e, fn=name: to_textbox(e, fn))
+
+        # --- Para os demais campos, mantém lógica padrão ---
+        else:
+            # Decide modo: entry ou textbox (apenas para campos fixos)
+            mode = "entry"
+            if not is_dynamic:
+                mode = self.fixed_field_modes.get(name, "entry")
+
+            def toggle_fixed_field_mode(event=None, field_name=name):
+                current = self.fixed_field_modes.get(field_name, "entry")
+                self.fixed_field_modes[field_name] = "textbox" if current == "entry" else "entry"
+                self.draw_all_fields()
+
+            if not is_dynamic:
+                label.bind("<Button-3>", toggle_fixed_field_mode)
+
+            if not is_dynamic and mode == "textbox":
+                textbox = ctk.CTkTextbox(row_frame, height=60, wrap="word")
+                if value not in (None, ""):
+                    textbox.insert("1.0", value)
+                textbox.grid(row=0, column=1, sticky="ew")
+                textbox.original_border_color = textbox.cget("border_color")
+                self.entries[name] = textbox
+            else:
+                entry = ctk.CTkEntry(row_frame, placeholder_text=f"{name}")
+                if value not in (None, ""):
+                    entry.insert(0, value)
+                entry.grid(row=0, column=1, sticky="ew")
+                self.entries[name] = entry
+                entry.original_border_color = entry.cget("border_color")
+
+        if is_dynamic:
+            btn_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
+            btn_frame.grid(row=0, column=2, sticky="e", padx=(5, 0))
+
+            up_btn = ctk.CTkButton(btn_frame, text="↑", width=30, command=lambda: self.move_field(name, -1))
+            down_btn = ctk.CTkButton(btn_frame, text="↓", width=30, command=lambda: self.move_field(name, 1))
+            del_btn = ctk.CTkButton(btn_frame, text="✕", width=30, fg_color="#A94444",
+                                    command=lambda: self.remove_field(name))
+
+            up_btn.pack(side="left", padx=2)
+            down_btn.pack(side="left", padx=2)
+            del_btn.pack(side="left", padx=2)
+
+
 
     def save_field_order(self):
         """Salva a ordem dos campos dinâmicos do template atual no arquivo config.json."""
@@ -266,68 +367,88 @@ class TemplateApp(ctk.CTk):
             self.show_snackbar("PIN desativado!", toast_type="info")
 
     def copy_template(self):
-            # Validate if a template is selected
-            if not self.current_template or self.current_template == "Selecione o template...":
-                self.show_snackbar("Selecione um template antes de copiar!", toast_type="error")
-                return
+        # Validate if a template is selected
+        if not self.current_template or self.current_template == "Selecione o template...":
+            self.show_snackbar("Selecione um template antes de copiar!", toast_type="error")
+            return
 
-            template = self.template_manager.get_template(self.current_template)
-            tem_vazios = False
+        template = self.template_manager.get_template(self.current_template)
+        tem_vazios = False
 
-            # Descobre quais campos realmente estão no template atual
-            placeholders = set(self.template_manager.extract_placeholders(template))
-            # Filtra apenas os campos presentes no template e que estão na interface
-            fields_to_validate = [k for k in self.entries if k in placeholders]
+        # Descobre quais campos realmente estão no template atual
+        placeholders = set(self.template_manager.extract_placeholders(template))
+        # Filtra apenas os campos presentes no template e que estão na interface
+        fields_to_validate = [k for k in self.entries if k in placeholders]
 
-            for key in fields_to_validate:
-                entry = self.entries[key]
+        for key in fields_to_validate:
+            entry = self.entries[key]
+            # Corrige: trata Entry e Textbox de forma robusta
+            if isinstance(entry, ctk.CTkTextbox):
+                value = entry.get("1.0", "end-1c")
+            else:
                 value = entry.get()
-                if not value:
-                    entry.configure(border_color="red")
-                    entry.bind("<FocusIn>", lambda e, ent=entry: ent.configure(border_color=ent.original_border_color))
-                    entry.bind("<FocusOut>", lambda e, ent=entry: self.animate_field_success(ent) if ent.get() else None)
-                    tem_vazios = True
-                template = template.replace(f"${key}$", value if value else "")
+            if not value:
+                entry.configure(border_color="red")
+                entry.border_color = "red"  # <-- Adicione esta linha para Entry e Textbox
+                entry.bind("<FocusIn>", lambda e, ent=entry: ent.configure(border_color=ent.original_border_color))
+                entry.bind(
+                    "<FocusOut>",
+                    lambda e, ent=entry: self.animate_field_success(ent)
+                    if (ent.get("1.0", "end-1c") if isinstance(ent, ctk.CTkTextbox) else ent.get())
+                    else None
+                )
+                tem_vazios = True
 
-            # Substitui placeholders dinâmicos
-            template = placeholder_engine.process(template)
+            template = template.replace(f"${key}$", value if value else "")
 
-            pyperclip.copy(template)
-            self.pulse_window()
-            self.show_snackbar("Copiado com sucesso!", toast_type="success")
+        # Substitui placeholders dinâmicos
+        template = placeholder_engine.process(template)
 
-            if tem_vazios:
-                self.show_snackbar("Existem campos em branco!", toast_type="warning")
+        pyperclip.copy(template)
+        self.pulse_window()
+        self.show_snackbar("Copiado com sucesso!", toast_type="success")
 
+        if tem_vazios:
+            self.show_snackbar("Existem campos em branco!", toast_type="warning")
 
 
 
     def preview_template(self):
-            template = self.template_manager.get_template(self.current_template)
-            for key, entry in self.entries.items():
+        template = self.template_manager.get_template(self.current_template)
+        for key, entry in self.entries.items():
+            # Corrige: trata Entry e Textbox de forma robusta
+            if isinstance(entry, ctk.CTkTextbox):
+                value = entry.get("1.0", "end-1c")
+            else:
                 value = entry.get()
-                template = template.replace(f"${key}$", value if value else "")
+            template = template.replace(f"${key}$", value if value else "")
 
-            # Substitui placeholders dinâmicos
-            template = placeholder_engine.process(template)
+        # Substitui placeholders dinâmicos
+        template = placeholder_engine.process(template)
 
-            preview = ctk.CTkToplevel(self)
-            preview.title("Visualização do Template")
-            preview.geometry("600x400")
-            preview.transient(self)
-            preview.grab_set()
+        preview = ctk.CTkToplevel(self)
+        preview.title("Visualização do Template")
+        preview.geometry("600x400")
+        preview.transient(self)
+        preview.grab_set()
 
-            box = ctk.CTkTextbox(preview, wrap="word")
-            box.insert("1.0", template)
-            box.configure(state="disabled")
-            box.pack(expand=True, fill="both", padx=20, pady=20)
+        box = ctk.CTkTextbox(preview, wrap="word")
+        box.insert("1.0", template)
+        box.configure(state="disabled")
+        box.pack(expand=True, fill="both", padx=20, pady=20)
+
 
     def load_template_placeholders(self):
         template_content = self.template_manager.get_template(self.current_template)
         placeholders = self.template_manager.extract_placeholders(template_content)
 
-        # SALVAR VALORES EXISTENTES
-        old_values = {k: v.get() for k, v in self.entries.items()}
+        # SALVAR VALORES EXISTENTES (Entry ou Textbox)
+        old_values = {}
+        for k, v in self.entries.items():
+            if isinstance(v, ctk.CTkTextbox):
+                old_values[k] = v.get("1.0", "end-1c")
+            else:
+                old_values[k] = v.get()
 
         # Filtra placeholders automáticos (handlers do PlaceholderEngine)
         automatic_placeholders = set(placeholder_engine.handlers.keys())
@@ -355,10 +476,16 @@ class TemplateApp(ctk.CTk):
         # RESTAURAR APENAS VALORES NÃO NULOS/NÃO VAZIOS
         for k in self.entries:
             valor_antigo = old_values.get(k, None)
+            entry = self.entries[k]
             if valor_antigo not in (None, ""):
-                self.entries[k].delete(0, "end")
-                self.entries[k].insert(0, valor_antigo)
+                if isinstance(entry, ctk.CTkTextbox):
+                    entry.delete("1.0", "end")
+                    entry.insert("1.0", valor_antigo)
+                else:
+                    entry.delete(0, "end")
+                    entry.insert(0, valor_antigo)
         # Se não houver valor antigo, deixa vazio para mostrar o placeholder
+
 
 
 
@@ -406,7 +533,12 @@ class TemplateApp(ctk.CTk):
 
         # Altura real do conteúdo do formulário
         form_height = self.form_frame.winfo_reqheight()  # ← usa o tamanho *requisitado*
-        extra_height = 250
+        # Calcula altura do label de crédito
+        author_label_height = 0
+        for widget in self.main_frame.grid_slaves(row=100, column=0):
+            author_label_height = widget.winfo_reqheight()
+            break
+        extra_height = 250 + author_label_height
 
         screen_height = self.winfo_screenheight()
         max_height = int(screen_height * 0.9)
@@ -430,40 +562,68 @@ class TemplateApp(ctk.CTk):
         self.animate_resize_to(final_height, on_complete=self.save_window_config)
 
 
-    def animate_resize_to(self, target_height, step=10, delay=10, on_complete=None):
+    def animate_resize_to(self, target_height, step=25, delay=10, on_complete=None):
         self.update_idletasks()
 
-        current_width = self.winfo_width()
-        if current_width < 350:
-            current_width = 350  # largura mínima
-
+        current_width = self._get_current_width()
         current_height = self.winfo_height()
         x, y = self.winfo_x(), self.winfo_y()
 
-        if current_height <= 1:
-            self.geometry(f"{current_width}x{target_height}+{x}+{y}")
-            if on_complete:
-                self.after(10, on_complete)
+        geometry_str = self._get_geometry_str(current_width, target_height, x, y)
+        abs_diff = abs(target_height - current_height)
+        direction = self._get_direction(target_height, current_height)
+        new_height = self._get_new_height(current_height, step, direction)
+        new_geometry_str = self._get_geometry_str(current_width, new_height, x, y)
+
+        if self._should_set_final_height(current_height):
+            self._set_final_geometry(geometry_str, on_complete)
             return
 
-        if abs(target_height - current_height) <= step:
-            self.geometry(f"{current_width}x{target_height}+{x}+{y}")
-            if on_complete:
-                self.after(10, on_complete)
+        if self._should_snap_to_target(abs_diff, step):
+            self._set_final_geometry(geometry_str, on_complete)
             return
 
-        direction = 1 if target_height > current_height else -1
-        new_height = current_height + (step * direction)
-        self.geometry(f"{current_width}x{new_height}+{x}+{y}")
-
+        self.geometry(new_geometry_str)
         self.after(delay, lambda: self.animate_resize_to(target_height, step, delay, on_complete))
+
+    def _get_current_width(self):
+        current_width = self.winfo_width()
+        if current_width < 350:
+            current_width = 350  # largura mínima
+        return current_width
+
+    def _get_geometry_str(self, width, height, x, y):
+        return f"{width}x{height}+{x}+{y}"
+
+    def _should_set_final_height(self, current_height):
+        return current_height <= 1
+
+    def _should_snap_to_target(self, abs_diff, step):
+        return abs_diff <= step
+
+    def _get_direction(self, target_height, current_height):
+        return 1 if target_height > current_height else -1
+
+    def _get_new_height(self, current_height, step, direction):
+        return current_height + (step * direction)
+
+    def _set_final_geometry(self, geometry_str, on_complete):
+        self.geometry(geometry_str)
+        if on_complete:
+            self.after(10, on_complete)
+
 
     def limpar_campos(self):
         for name, entry in self.entries.items():
-            entry.delete(0, "end")
-            entry.insert(0, "")
-            entry.configure(placeholder_text=name)
-            entry.configure(border_color=entry.original_border_color)
+            if isinstance(entry, ctk.CTkTextbox):
+                entry.delete("1.0", "end")
+                entry.insert("1.0", "")
+                entry.configure(border_color=entry.original_border_color)
+            else:
+                entry.delete(0, "end")
+                entry.insert(0, "")
+                entry.configure(placeholder_text=name)
+                entry.configure(border_color=entry.original_border_color)
 
         self.show_snackbar("Campos limpos!", toast_type="info")
 
@@ -528,6 +688,60 @@ class TemplateApp(ctk.CTk):
                 self.after(30, lambda: fade_out(opacity - 0.1))
 
         self.after(duration, lambda: fade_out())
+
+    def create_tooltip(self, widget, text, fg_color="#222", text_color="#fff"):
+        """
+        Attach a custom tooltip to a widget. The tooltip appears on hover and disappears on leave.
+
+        Args:
+            widget: The widget to attach the tooltip to.
+            text (str): The text to display in the tooltip.
+            fg_color (str, optional): Background color of the tooltip. Defaults to "#222".
+            text_color (str, optional): Text color of the tooltip. Defaults to "#fff".
+        """
+        tooltip = {"window": None}
+
+        def show_tooltip(event=None):
+            # Always destroy any previous tooltip before showing a new one
+            hide_tooltip()
+            if tooltip["window"] is not None:
+                return
+            tooltip["window"] = tw = ctk.CTkToplevel(widget)
+            tw.overrideredirect(True)
+            tw.attributes("-topmost", True)
+            label = ctk.CTkLabel(
+                tw,
+                text=text,
+                font=ctk.CTkFont(size=11),
+                text_color=text_color,
+                fg_color=fg_color,
+                padx=7, pady=3
+            )
+            label.pack()
+            widget.update_idletasks()
+            x = widget.winfo_rootx() + widget.winfo_width() + 7
+            y = widget.winfo_rooty() - 3
+            tw.geometry(f"+{x}+{y}")
+
+        def hide_tooltip(event=None):
+            if tooltip["window"] is not None:
+                try:
+                    tooltip["window"].destroy()
+                except Exception:
+                    pass
+                tooltip["window"] = None
+
+        def force_hide_tooltip(event=None):
+            # Força o fechamento do tooltip em qualquer situação
+            hide_tooltip()
+            widget.after(1, hide_tooltip)
+
+        widget.bind("<Enter>", show_tooltip)
+        widget.bind("<Leave>", force_hide_tooltip)
+        widget.bind("<ButtonPress>", force_hide_tooltip)
+        widget.bind("<FocusOut>", force_hide_tooltip)
+        widget.bind("<Destroy>", force_hide_tooltip)
+
 
     def animate_field_success(self, entry):
         if self.visual_feedback_enabled:    
