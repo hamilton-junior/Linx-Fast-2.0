@@ -9,12 +9,13 @@ from template_editor import TemplateEditor
 from template_manager import TemplateManager
 from theme_manager import ThemeManager
 from dpm import DailyPasswordManager
+from settings_window import SettingsWindow
 from customtkinter import CTkInputDialog
 
 if sys.platform == "win32":
     import ctypes
     try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # SYSTEM_AWARE
+        ctypes.windll.shcore.SetProcessDpiAwareness(0)
     except Exception as e:
         print(f"[DPI WARNING] Could not set DPI awareness: {e}")
 
@@ -26,13 +27,23 @@ class TemplateApp(ctk.CTk):
         self.geometry("360x535")
         self.visual_feedback_enabled = True
 
+        # Carrega config de campos expansíveis
+        self.expandable_fields = self.load_expandable_fields_config()
 
-        ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("green")
+        # Carrega config de tema e aparência
+        self.theme_name, self.appearance_mode = self.load_theme_config()
+        ctk.set_appearance_mode(self.appearance_mode)
+        # Ajuste: se for tema customizado, usa o caminho completo
+        import os
+        theme_path = os.path.join("themes", f"{self.theme_name}.json")
+        if self.theme_name in ("green", "blue", "dark-blue") or not os.path.exists(theme_path):
+            ctk.set_default_color_theme(self.theme_name)
+        else:
+            ctk.set_default_color_theme(theme_path)
 
         #Inicialização das classes
         self.template_manager = TemplateManager()
-        self.theme_manager = ThemeManager()
+        self.theme_manager = ThemeManager(theme_name=self.theme_name, mode=self.appearance_mode)
         self.password_manager = DailyPasswordManager()
         self.fixed_fields = [
             "Nome", "Problema Relatado", "CNPJ",
@@ -64,6 +75,9 @@ class TemplateApp(ctk.CTk):
         self.main_frame = ctk.CTkFrame(self)
         self.main_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         self.main_frame.grid_columnconfigure(0, weight=1)
+
+        # Botão de Configurações
+        ctk.CTkButton(self.main_frame, text="⚙️", width=5, command=self.open_settings).grid(row=99, column=0, pady=(5, 5), sticky="e")
 
         
         selector_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -194,8 +208,8 @@ class TemplateApp(ctk.CTk):
         )
         label.grid(row=0, column=0, sticky="w", padx=(0, 5))
 
-        # --- Apenas para "Procedimento Executado": alterna Entry/Textbox conforme foco ---
-        if name == "Procedimento Executado":
+        # --- Para campos expansíveis definidos pelo usuário ---
+        if name in getattr(self, "expandable_fields", []):
             entry = ctk.CTkEntry(row_frame, placeholder_text=f"{name}")
             if value not in (None, ""):
                 entry.insert(0, value)
@@ -208,29 +222,19 @@ class TemplateApp(ctk.CTk):
                 if isinstance(current_widget, ctk.CTkTextbox):
                     return
                 val = current_widget.get()
-                # Captura a cor da borda atual do entry
-                current_border_color = current_widget.cget("border_color")
-                # Captura a cor da borda atual do entry
                 current_border_color = current_widget.cget("border_color")
                 current_widget.grid_forget()
-                textbox = ctk.CTkTextbox(row_frame, height=60, wrap="word", border_width=2)
                 textbox = ctk.CTkTextbox(row_frame, height=60, wrap="word", border_width=2)
                 if val:
                     textbox.insert("1.0", val)
                 textbox.grid(row=0, column=1, sticky="ew")
                 textbox.original_border_color = textbox.cget("border_color")
                 self.entries[field_name] = textbox
-                # Aplica a mesma cor de borda do entry ao textbox APÓS grid
-                textbox.after(1, lambda: textbox.configure(border_color=current_border_color))
-                textbox.border_color = current_border_color
-                # Aplica a mesma cor de borda do entry ao textbox APÓS grid
                 textbox.after(1, lambda: textbox.configure(border_color=current_border_color))
                 textbox.border_color = current_border_color
                 textbox.focus()
                 textbox.bind("<FocusOut>", lambda e, fn=field_name: to_entry(e, fn))
-                # Redimensiona a janela para manter botões visíveis
                 self.adjust_window_height()
-
 
             def to_entry(event, field_name=name):
                 current_widget = self.entries[field_name]
@@ -241,16 +245,15 @@ class TemplateApp(ctk.CTk):
                 entry = ctk.CTkEntry(row_frame, placeholder_text=f"{field_name}")
                 if val:
                     entry.insert(0, val)
-                # Se não houver valor, deixa vazio para mostrar o placeholder
                 entry.grid(row=0, column=1, sticky="ew")
                 entry.original_border_color = entry.cget("border_color")
                 self.entries[field_name] = entry
                 entry.bind("<FocusIn>", lambda e, fn=field_name: to_textbox(e, fn))
-                # Se o valor não está vazio e a borda estava vermelha, anima sucesso
                 if val and getattr(current_widget, "border_color", None) == "red":
                     self.animate_field_success(entry)
 
             entry.bind("<FocusIn>", lambda e, fn=name: to_textbox(e, fn))
+
 
         # --- Para os demais campos, mantém lógica padrão ---
         else:
@@ -312,9 +315,7 @@ class TemplateApp(ctk.CTk):
                 label.bind("<Button-3>", toggle_fixed_field_mode)
 
             # Inicialização padrão (Entry ou Textbox)
-            # Inicialização padrão (Entry ou Textbox)
             if not is_dynamic and mode == "textbox":
-                entry = ctk.CTkEntry(row_frame, placeholder_text=f"{name}")
                 entry = ctk.CTkEntry(row_frame, placeholder_text=f"{name}")
                 if value not in (None, ""):
                     entry.insert(0, value)
@@ -325,7 +326,7 @@ class TemplateApp(ctk.CTk):
                 entry.border_color = entry.original_border_color
                 # Troca imediatamente para textbox
                 toggle_fixed_field_mode(None, name)
-                    entry.insert(0, value)
+                entry.insert(0, value)
                 entry.grid(row=0, column=1, sticky="ew")
                 entry.original_border_color = entry.cget("border_color")
                 self.entries[name] = entry
@@ -483,9 +484,9 @@ class TemplateApp(ctk.CTk):
 
         pyperclip.copy(template)
         self.pulse_window()
-        self.show_snackbar("Copiado com sucesso!", toast_type="success")
-
-        if tem_vazios:
+        if not tem_vazios:
+            self.show_snackbar("Copiado com sucesso!", toast_type="success")
+        else:
             self.show_snackbar("Existem campos em branco!", toast_type="warning")
 
 
@@ -899,6 +900,120 @@ class TemplateApp(ctk.CTk):
         self.update_idletasks()  # Garante que a geometria seja a real
         self.save_window_config()
         self.destroy()
+
+    # --- Configuração de campos expansíveis ---
+    def load_expandable_fields_config(self):
+        import json
+        if os.path.exists("config.json"):
+            try:
+                with open("config.json", "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                return config.get("expandable_fields", ["Procedimento Executado", "Problema Relatado"])
+            except Exception:
+                return ["Procedimento Executado", "Problema Relatado"]
+        return ["Procedimento Executado", "Problema Relatado"]
+
+    def save_expandable_fields_config(self):
+        import json
+        config = {}
+        if os.path.exists("config.json"):
+            try:
+                with open("config.json", "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+        config["expandable_fields"] = self.expandable_fields
+        with open("config.json", "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4)
+
+    def open_settings(self):
+        # Permite apenas uma janela de configurações por vez
+        if hasattr(self, "_settings_window") and self._settings_window is not None:
+            try:
+                self._settings_window.focus()
+                self._settings_window.lift()
+                return
+            except Exception:
+                self._settings_window = None  # Se a janela foi fechada manualmente
+
+        self._settings_window = SettingsWindow(self)
+        # Quando a janela for fechada, remove a referência
+        def on_close_settings():
+            win = self._settings_window
+            self._settings_window = None
+            if win is not None:
+                win.destroy()
+        self._settings_window.protocol("WM_DELETE_WINDOW", on_close_settings)
+
+    def reload_theme_and_interface(self):
+        # 1. Salva o estado atual
+        state = {
+            "current_template": self.current_template,
+            "current_template_display": self.current_template_display.get(),
+            "dynamic_fields": list(self.dynamic_fields),
+            "fixed_field_modes": dict(self.fixed_field_modes),
+            "expandable_fields": list(self.expandable_fields),
+            "field_values": {},
+        }
+        for k, v in self.entries.items():
+            try:
+                state["field_values"][k] = v.get()
+            except Exception:
+                try:
+                    state["field_values"][k] = v.get("1.0", "end-1c")
+                except Exception:
+                    state["field_values"][k] = ""
+
+        # 2. Destroi widgets principais
+        for widget in self.winfo_children():
+            widget.destroy()
+
+        # 3. Recria interface
+        self._build_main_interface()
+        # 4. Restaura estado
+        self.current_template = state["current_template"]
+        self.current_template_display.set(state["current_template_display"])
+        self.dynamic_fields = state["dynamic_fields"]
+        self.fixed_field_modes = state["fixed_field_modes"]
+        self.expandable_fields = state["expandable_fields"]
+        self.load_template_placeholders()
+        # 5. Restaura valores dos campos
+        for k in self.entries:
+            valor_antigo = state["field_values"].get(k, None)
+            entry = self.entries[k]
+            if valor_antigo not in (None, ""):
+                if isinstance(entry, ctk.CTkTextbox):
+                    entry.delete("1.0", "end")
+                    entry.insert("1.0", valor_antigo)
+                else:
+                    entry.delete(0, "end")
+                    entry.insert(0, valor_antigo)
+    def load_theme_config(self):
+        import json
+        if os.path.exists("config.json"):
+            try:
+                with open("config.json", "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                theme = config.get("theme_name", "green")
+                mode = config.get("appearance_mode", "dark")
+                return theme, mode
+            except Exception:
+                return "green", "dark"
+        return "green", "dark"
+
+    def save_theme_config(self, theme_name, appearance_mode):
+        import json
+        config = {}
+        if os.path.exists("config.json"):
+            try:
+                with open("config.json", "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+        config["theme_name"] = theme_name
+        config["appearance_mode"] = appearance_mode
+        with open("config.json", "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4)
 
 class PlaceholderEngine:
     """

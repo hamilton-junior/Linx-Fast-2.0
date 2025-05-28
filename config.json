@@ -1,5 +1,1 @@
-<<<<<<< HEAD
-{"daily_password": {"date": "2025-05-27", "password": null}, "geometry": "350x530+0+0", "field_orders": {"Suporte / Teste Vars": ["Field1", "FIeld2", "Field3", "Field4", "Field5"], "Suporte / Abertura de Chamado": [], "Selecione o template...": []}}
-=======
-{"daily_password": {"date": "2025-05-27", "password": null}, "geometry": "350x562+598+195", "field_orders": {"Suporte / Teste Vars": ["Field1", "FIeld2", "Field3", "Field4", "Field5"], "Suporte / Abertura de Chamado": [], "Selecione o template...": []}}
->>>>>>> bb6fd66 (Aprimorada a troca entre Entry e Textbox, garantindo a preservação da cor da borda e a lógica de foco. Ajustes na interface do QuickTemplatePopup para refletir essas mudanças.)
+{"daily_password": {"date": "2025-05-28", "password": null}, "geometry": "350x530+714+241", "expandable_fields": ["Problema Relatado", "Procedimento Executado"], "theme_name": "Shadow Isles", "appearance_mode": "dark"}

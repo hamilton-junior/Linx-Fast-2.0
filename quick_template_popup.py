@@ -178,8 +178,8 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             label = ctk.CTkLabel(self.form_frame, text=field)
             label.grid(row=i, column=0, sticky="w", pady=(2, 2))
 
-            # --- Procedimento Executado: alterna Entry/Textbox conforme foco ---
-            if field == "Procedimento Executado":
+            # --- Procedimento Executado e Problema Relatado: alterna Entry/Textbox conforme foco ---
+            if field in ("Procedimento Executado", "Problema Relatado"):
                 entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field}")
                 # Se o toggle "Limpar?" estiver desmarcado, restaura valor antigo se existir
                 if hasattr(self, "clear_on_switch") and not self.clear_on_switch.get():
@@ -201,7 +201,6 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                         textbox.insert("1.0", val)
                     textbox.grid(row=row_idx, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
                     self.entries[field_name] = textbox
-                    # Aplica a mesma cor de borda do entry ao textbox APÓS grid
                     textbox.after(1, lambda: textbox.configure(border_color=current_border_color))
                     textbox.border_color = current_border_color
                     textbox.focus()
@@ -216,7 +215,6 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                     entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field_name}")
                     if val:
                         entry.insert(0, val)
-                    # Se não houver valor, deixa vazio para mostrar o placeholder
                     entry.grid(row=row_idx, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
                     self.entries[field_name] = entry
                     entry.bind("<FocusIn>", lambda e, fn=field_name, r=row_idx: to_textbox(e, fn, r))
