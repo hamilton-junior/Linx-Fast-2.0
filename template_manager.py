@@ -82,7 +82,22 @@ class TemplateManager:
             return f.read()
 
     def extract_placeholders(self, content):
-        return list({match.strip("$") for match in re.findall(r"\$[a-zA-Z0-9 _\\-çÇáéíóúãõâêîôûÀ-ÿ]+\$", content)})
+        # Suporta campos inteligentes: $[checkbox]Campo$, $[switch]Campo$, $[radio:op1|op2]Campo$
+        # E também extrai corretamente campos usados em condicionais
+        import re
+        # Extrai todos os $...$ do template
+        all_matches = re.findall(
+            r"\$([^\$]+)\$", content
+        )
+        placeholders = set()
+        for match in all_matches:
+            # Se for condicional ($Campo?Texto|Alternativa$), pega só o nome do campo antes do ?
+            if "?" in match and "|" in match:
+                field_name = match.split("?", 1)[0].strip()
+                placeholders.add(field_name)
+            else:
+                placeholders.add(match.strip())
+        return list(placeholders)
 
     def get_default_template(self):
         return (

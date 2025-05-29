@@ -75,10 +75,6 @@ class TemplateApp(ctk.CTk):
         self.main_frame = ctk.CTkFrame(self)
         self.main_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         self.main_frame.grid_columnconfigure(0, weight=1)
-
-        # Botão de Configurações
-        ctk.CTkButton(self.main_frame, text="⚙️", width=5, command=self.open_settings).grid(row=99, column=0, pady=(5, 5), sticky="e")
-
         
         selector_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         selector_frame.grid(row=0, column=0, sticky="w", padx=5, pady=(5, 5))
@@ -150,15 +146,32 @@ class TemplateApp(ctk.CTk):
                         fg_color="#5E35B1", hover_color="#4527A0",
                         command=self.open_quick_mode).grid(row=6, column=0, pady=(5, 5))
 
-        # --- Label de Créditos do Autor ---
+        # --- Frame inferior para label de crédito e botão de config alinhados ---
+        bottom_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        bottom_frame.grid(row=100, column=0, sticky="ew", pady=(8, 2), padx=0)
+        bottom_frame.grid_columnconfigure(0, weight=1)
+        bottom_frame.grid_columnconfigure(1, weight=0)
+
+        # Label de Créditos do Autor centralizada
         label_autor = ctk.CTkLabel(
-            self.main_frame,
+            bottom_frame,
             text="By Hamilton Junior",
             font=ctk.CTkFont(size=10, slant="italic"),
             text_color="#888888",
-            anchor="center"
+            anchor="center",
+            justify="center"
         )
-        label_autor.grid(row=100, column=0, sticky="ew", pady=(8, 2), padx=0)
+        label_autor.grid(row=0, column=0, sticky="ew", padx=(2, 5))
+
+        # Botão de Configurações
+        ctk.CTkButton(
+            bottom_frame,
+            text="⚙️",
+            width=32,
+            anchor="e",
+            command=self.open_settings
+        ).grid(row=0, column=1, sticky="e", padx=(5, 8))
+
         self.main_frame.grid_rowconfigure(100, weight=0)
 
 
@@ -194,22 +207,63 @@ class TemplateApp(ctk.CTk):
         return len(text) > 15 and " " in text
 
     def _draw_field(self, name, row, value="", is_dynamic=True):
+        import re
         row_frame = ctk.CTkFrame(self.form_frame, fg_color="transparent")
         row_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
-        row_frame.grid_columnconfigure(1, weight=1)  # Apenas a entrada expande
+        row_frame.grid_columnconfigure(1, weight=1)
 
-        # LABEL (sempre igual)
+        # Detecta tipo especial de campo
+        field_type = "entry"
+        field_label = name
+        radio_options = None
+
+        m = re.match(r"\[(checkbox|switch)\](.+)", name)
+        if m:
+            field_type = m.group(1)
+            field_label = m.group(2).strip()
+        else:
+            m = re.match(r"\[radio:([^\]]+)\](.+)", name)
+            if m:
+                field_type = "radio"
+                radio_options = [opt.strip() for opt in m.group(1).split("|")]
+                field_label = m.group(2).strip()
+
+        # LABEL
         label = ctk.CTkLabel(
             row_frame,
-            text=name,
+            text=field_label,
             anchor="w",
             justify="left",
-            width=160  # largura fixa para alinhamento
+            width=160
         )
         label.grid(row=0, column=0, sticky="w", padx=(0, 5))
 
+        # --- Campo inteligente ---
+        #Checkbox: $[checkbox]Aceite$
+        #Switch: $[switch]Ativo$
+        #Radio: $[radio:Sim|Não|Talvez]Opção$
+        #Condicional: $[checkbox]Aceite?Aceito|Não aceito$
+        
+        if field_type == "checkbox":
+            var = ctk.BooleanVar(value=(value == "1" or value is True))
+            entry = ctk.CTkCheckBox(row_frame, text="", variable=var)
+            entry.grid(row=0, column=1, sticky="w")
+            self.entries[name] = entry
+        elif field_type == "switch":
+            var = ctk.StringVar(value=value if value else "Sim")
+            entry = ctk.CTkSwitch(row_frame, text="", variable=var, onvalue="Sim", offvalue="Não", )
+            entry.grid(row=0, column=1, sticky="w")
+            self.entries[name] = entry
+        elif field_type == "radio" and radio_options:
+            var = ctk.StringVar(value=value if value in radio_options else radio_options[0])
+            radio_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
+            radio_frame.grid(row=0, column=1, sticky="w")
+            for i, opt in enumerate(radio_options):
+                btn = ctk.CTkRadioButton(radio_frame, text=opt, variable=var, value=opt)
+                btn.pack(side="left", padx=2)
+            self.entries[name] = var
         # --- Para campos expansíveis definidos pelo usuário ---
-        if name in getattr(self, "expandable_fields", []):
+        elif name in getattr(self, "expandable_fields", []):
             entry = ctk.CTkEntry(row_frame, placeholder_text=f"{name}")
             if value not in (None, ""):
                 entry.insert(0, value)
@@ -449,37 +503,57 @@ class TemplateApp(ctk.CTk):
 
         # Descobre quais campos realmente estão no template atual
         placeholders = set(self.template_manager.extract_placeholders(template))
-        # Filtra apenas os campos presentes no template e que estão na interface
-        fields_to_validate = [k for k in self.entries if k in placeholders]
 
+        # Também inclui campos usados em condicionais ($Campo?Texto|Alternativa$)
+        import re
+        cond_fields = set()
+        for match in re.findall(r"\$([a-zA-Z0-9 _\-çÇáéíóúãõâêîôûÀ-ÿ\[\]%:/]+)\?", template):
+            cond_fields.add(match.strip())
+
+        all_fields = placeholders | cond_fields
+
+        # Filtra apenas os campos presentes no template e que estão na interface
+        fields_to_validate = [k for k in self.entries if k in all_fields]
+
+        # 1. Coleta valores dos campos
+        field_values = {}
         for key in fields_to_validate:
             entry = self.entries[key]
-            # Garante que o widget ainda existe antes de usar .get()
             if not entry.winfo_exists():
                 continue
-            # Garante que o widget ainda existe antes de usar .get()
-            if not entry.winfo_exists():
-                continue
-            # Corrige: trata Entry e Textbox de forma robusta
-            if isinstance(entry, ctk.CTkTextbox):
+            # Campos inteligentes
+            if isinstance(entry, ctk.CTkCheckBox):
+                value = "Sim" if entry.get() else "Não"
+            elif isinstance(entry, ctk.CTkSwitch):
+                value = str(entry.get())
+            elif isinstance(entry, ctk.StringVar):
+                value = str(entry.get())
+            elif isinstance(entry, ctk.CTkTextbox):
                 value = entry.get("1.0", "end-1c")
             else:
-                value = entry.get()
-            if not value:
-                entry.configure(border_color="red")
-                entry.border_color = "red"  # <-- Adicione esta linha para Entry e Textbox
-                entry.bind("<FocusIn>", lambda e, ent=entry: ent.configure(border_color=ent.original_border_color))
-                entry.bind(
-                    "<FocusOut>",
-                    lambda e, ent=entry: self.animate_field_success(ent)
-                    if (ent.get("1.0", "end-1c") if isinstance(ent, ctk.CTkTextbox) else ent.get())
-                    else None
-                )
+                value = str(entry.get())
+            field_values[key] = value
+            if not value or value == "Não":
+                if hasattr(entry, "configure"):
+                    entry.configure(border_color="red")
+                    entry.border_color = "red"
+                    entry.bind("<FocusIn>", lambda e, ent=entry: ent.configure(border_color=ent.original_border_color))
+                    entry.bind(
+                        "<FocusOut>",
+                        lambda e, ent=entry: self.animate_field_success(ent)
+                        if (ent.get("1.0", "end-1c") if isinstance(ent, ctk.CTkTextbox) else ent.get())
+                        else None
+                    )
                 tem_vazios = True
 
+        # 2. Processa lógica condicional no template
+        template = self.process_conditionals(template, field_values)
+
+        # 3. Substitui placeholders simples
+        for key, value in field_values.items():
             template = template.replace(f"${key}$", value if value else "")
 
-        # Substitui placeholders dinâmicos
+        # 4. Substitui placeholders dinâmicos
         template = placeholder_engine.process(template)
 
         pyperclip.copy(template)
@@ -493,14 +567,25 @@ class TemplateApp(ctk.CTk):
 
     def preview_template(self):
         template = self.template_manager.get_template(self.current_template)
+        # Coleta valores dos campos
+        field_values = {}
         for key, entry in self.entries.items():
-            # Corrige: trata Entry e Textbox de forma robusta
-            if isinstance(entry, ctk.CTkTextbox):
+            if isinstance(entry, ctk.CTkCheckBox):
+                value = "Sim" if entry.get() else "Não"
+            elif isinstance(entry, ctk.CTkSwitch):
+                value = str(entry.get())
+            elif isinstance(entry, ctk.StringVar):
+                value = str(entry.get())
+            elif isinstance(entry, ctk.CTkTextbox):
                 value = entry.get("1.0", "end-1c")
             else:
-                value = entry.get()
+                value = str(entry.get())
+            field_values[key] = value
+        # Processa lógica condicional
+        template = self.process_conditionals(template, field_values)
+        # Substitui placeholders simples
+        for key, value in field_values.items():
             template = template.replace(f"${key}$", value if value else "")
-
         # Substitui placeholders dinâmicos
         template = placeholder_engine.process(template)
 
@@ -540,8 +625,16 @@ class TemplateApp(ctk.CTk):
                 return True
             return False
         # REDEFINIR CAMPOS DINÂMICOS com base no novo template
+        # Também inclui campos usados em condicionais
+        import re
+        cond_fields = set()
+        for match in re.findall(r"\$([a-zA-Z0-9 _\-çÇáéíóúãõâêîôûÀ-ÿ\[\]%:/]+)\?", template_content):
+            cond_fields.add(match.strip())
+
+        all_fields = set(placeholders) | cond_fields
+
         self.dynamic_fields = [
-            ph for ph in placeholders
+            ph for ph in all_fields
             if ph not in self.fixed_fields and not is_automatic(ph)
         ]
 
@@ -563,7 +656,6 @@ class TemplateApp(ctk.CTk):
                     entry.delete(0, "end")
                     entry.insert(0, valor_antigo)
         # Se não houver valor antigo, deixa vazio para mostrar o placeholder
-
 
 
 
@@ -767,6 +859,40 @@ class TemplateApp(ctk.CTk):
                 self.after(30, lambda: fade_out(opacity - 0.1))
 
         self.after(duration, lambda: fade_out())
+
+    def process_conditionals(self, template, field_values):
+        """
+        Substitui todos os padrões $Campo?Texto|Alternativa$ no template.
+        Se o campo estiver preenchido, usa Texto (pode conter outros placeholders).
+        Se não, usa Alternativa (pode conter outros placeholders).
+        """
+        import re
+
+        def cond_replacer(match):
+            field = match.group(1)
+            if "?" in field and "|" in field:
+                # Suporte a aninhamento acidental, pega só o primeiro ?
+                field_name, rest = field.split("?", 1)
+                if "|" in rest:
+                    text_true, text_false = rest.split("|", 1)
+                else:
+                    text_true, text_false = rest, ""
+                value = field_values.get(field_name, "")
+                # Se for checkbox, só considera "Sim" como verdadeiro
+                if field_name.startswith("[checkbox]"):
+                    is_true = value == "Sim"
+                else:
+                    is_true = bool(value)
+                # Recursivo: processa condicional dentro de Texto/Alternativa
+                if is_true:
+                    return self.process_conditionals(text_true, field_values)
+                else:
+                    return self.process_conditionals(text_false, field_values)
+            return match.group(0)
+
+        # Regex: $Campo?Texto|Alternativa$
+        return re.sub(r"\$([a-zA-Z0-9 _\-çÇáéíóúãõâêîôûÀ-ÿ\[\]%:/\?\|]+)\$", cond_replacer, template)
+
 
     def create_tooltip(self, widget, text, fg_color="#222", text_color="#fff"):
         """
