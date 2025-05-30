@@ -174,14 +174,49 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         used_fields = fixed_present + dynamic_ordered
 
 
+        import re
+        def detect_field_type(name):
+            field_type = "entry"
+            field_label = name
+            radio_options = None
+
+            m = re.match(r"\[(checkbox|switch)\](.+)", name)
+            if m:
+                field_type = m.group(1)
+                field_label = m.group(2).strip()
+            else:
+                m = re.match(r"\[radio:([^\]]+)\](.+)", name)
+                if m:
+                    field_type = "radio"
+                    radio_options = [opt.strip() for opt in m.group(1).split("|")]
+                    field_label = m.group(2).strip()
+            return field_type, field_label, radio_options
+
         for i, field in enumerate(used_fields):
-            label = ctk.CTkLabel(self.form_frame, text=field)
+            field_type, field_label, radio_options = detect_field_type(field)
+            label = ctk.CTkLabel(self.form_frame, text=field_label)
             label.grid(row=i, column=0, sticky="w", pady=(2, 2))
 
-            # --- Procedimento Executado e Problema Relatado: alterna Entry/Textbox conforme foco ---
-            if field in ("Procedimento Executado", "Problema Relatado"):
-                entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field}")
-                # Se o toggle "Limpar?" estiver desmarcado, restaura valor antigo se existir
+            if field_type == "checkbox":
+                var = ctk.BooleanVar(value=False)
+                entry = ctk.CTkCheckBox(self.form_frame, text="", variable=var)
+                entry.grid(row=i, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
+                self.entries[field] = entry
+            elif field_type == "switch":
+                var = ctk.StringVar(value="Sim")
+                entry = ctk.CTkSwitch(self.form_frame, text="", variable=var, onvalue="Sim", offvalue="Não")
+                entry.grid(row=i, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
+                self.entries[field] = entry
+            elif field_type == "radio" and radio_options:
+                var = ctk.StringVar(value=radio_options[0])
+                radio_frame = ctk.CTkFrame(self.form_frame, fg_color="transparent")
+                radio_frame.grid(row=i, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
+                for opt in radio_options:
+                    btn = ctk.CTkRadioButton(radio_frame, text=opt, variable=var, value=opt)
+                    btn.pack(side="left", padx=2)
+                self.entries[field] = var
+            elif field in ("Procedimento Executado", "Problema Relatado"):
+                entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field_label}")
                 if hasattr(self, "clear_on_switch") and not self.clear_on_switch.get():
                     valor_antigo = old_values.get(field, None)
                     if valor_antigo not in (None, ""):
@@ -212,7 +247,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                         return
                     val = current_widget.get("1.0", "end-1c")
                     current_widget.grid_forget()
-                    entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field_name}")
+                    entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field_label}")
                     if val:
                         entry.insert(0, val)
                     entry.grid(row=row_idx, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
@@ -220,9 +255,8 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                     entry.bind("<FocusIn>", lambda e, fn=field_name, r=row_idx: to_textbox(e, fn, r))
 
                 entry.bind("<FocusIn>", lambda e, fn=field, r=i: to_textbox(e, fn, r))
-            # --- Demais campos: Entry padrão ---
             else:
-                entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field}")
+                entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field_label}")
                 if hasattr(self, "clear_on_switch") and not self.clear_on_switch.get():
                     valor_antigo = old_values.get(field, None)
                     if valor_antigo not in (None, ""):
@@ -272,24 +306,57 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             self.geometry(f"400x{final_height}")                
             
     def copy_template(self):
-            from app import placeholder_engine  # Importa aqui para evitar import circular
+        from app import placeholder_engine  # Importa aqui para evitar import circular
 
-            template_name = self.template_var.get()
-            if not template_name:
-                messagebox.showerror("Erro", "Selecione um template.")
-                return
+        template_name = self.template_var.get()
+        if not template_name:
+            messagebox.showerror("Erro", "Selecione um template.")
+            return
 
-            content = self.manager.get_template(template_name)
+        content = self.manager.get_template(template_name)
 
-            for key, entry in self.entries.items():
-                value = entry.get()
-                content = content.replace(f"${key}$", value if value else "")
+        # 1. Coleta valores dos campos
+        import customtkinter as ctk
+        field_values = {}
+        for key, entry in self.entries.items():
+            if isinstance(entry, ctk.CTkCheckBox):
+                value = "Sim" if entry.get() else "Não"
+            elif isinstance(entry, ctk.CTkSwitch):
+                value = "Sim" if entry.get() == "Sim" else "Não"
+            elif isinstance(entry, ctk.StringVar):
+                value = str(entry.get())
+            elif isinstance(entry, ctk.CTkTextbox):
+                value = entry.get("1.0", "end-1c")
+            else:
+                value = str(entry.get())
+            field_values[key] = value
 
-            # Substitui placeholders automáticos/dinâmicos
-            content = placeholder_engine.process(content)
+        # 2. Processa lógica condicional no template
+        def process_conditionals(template, field_values):
+            import re
+            def cond_repl(match):
+                field = match.group(1)
+                true_val = match.group(2)
+                false_val = match.group(3)
+                val = field_values.get(field, "")
+                # Considera "Sim", "sim", "True", True, "1", 1 como verdadeiro
+                if str(val).lower() in ("sim", "true", "1"):
+                    return true_val
+                else:
+                    return false_val
+            return re.sub(r"\$([^\$?]+)\?([^\|$]+)\|([^\$]+)\$", cond_repl, template)
 
-            import pyperclip
-            pyperclip.copy(content)
+        content = process_conditionals(content, field_values)
+
+        # 3. Substitui placeholders simples
+        for key, value in field_values.items():
+            content = content.replace(f"${key}$", value if value else "")
+
+        # 4. Substitui placeholders automáticos/dinâmicos
+        content = placeholder_engine.process(content)
+
+        import pyperclip
+        pyperclip.copy(content)
 
     def copy_and_close(self):
         template_name = self.template_var.get()
