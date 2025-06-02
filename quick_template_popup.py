@@ -10,6 +10,8 @@ class QuickTemplatePopup(ctk.CTkToplevel):
     def __init__(self, master, manager):
         super().__init__(master)
         self.title("Modo Simples – Linx Fast")
+        self._after_ids = set()
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.manager = manager
         self.theme_manager = ThemeManager()
         self.geometry("325x250")
@@ -74,7 +76,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                 self.tooltip = None
 
         self.clear_toggle.bind("<Enter>", show_tooltip)
-        self.clear_toggle.bind("<Leave>", hide_tooltip)
+        self.clear_toggle.bind("<Leave>", lambda e: self._safe_after(1, hide_tooltip))
         # Dropdown expansível ocupando o espaço restante
         self.template_dropdown = ctk.CTkOptionMenu(
             self,
@@ -111,7 +113,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
 
 
     def load_template(self, template_name):
-        from app import placeholder_engine  # Importa aqui para evitar import circular
+        from main_window import placeholder_engine  # Importa aqui para evitar import circular
         import json
         import os
 
@@ -306,7 +308,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             self.geometry(f"400x{final_height}")                
             
     def copy_template(self):
-        from app import placeholder_engine  # Importa aqui para evitar import circular
+        from main_window import placeholder_engine  # Importa aqui para evitar import circular
 
         template_name = self.template_var.get()
         if not template_name:
@@ -372,4 +374,21 @@ class QuickTemplatePopup(ctk.CTkToplevel):
 
         import pyperclip
         pyperclip.copy(content)
+        self.destroy()
+
+    def _safe_after(self, delay, callback):
+        after_id = self.after(delay, callback)
+        self._after_ids.add(after_id)
+        return after_id
+
+    def _cancel_all_afters(self):
+        for after_id in list(self._after_ids):
+            try:
+                self.after_cancel(after_id)
+            except Exception:
+                pass
+            self._after_ids.discard(after_id)
+
+    def on_close(self):
+        self._cancel_all_afters()
         self.destroy()

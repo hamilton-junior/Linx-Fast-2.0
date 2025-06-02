@@ -6,6 +6,8 @@ class TemplateEditor(ctk.CTkToplevel):
     def __init__(self, master, manager, get_placeholders_callback, current_template="Geral / Template Padrão"):
         super().__init__(master)
         self.title("Editor de Templates")
+        self._after_ids = set()
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.geometry("860x540")
         self.transient(master)
         self.grab_set()
@@ -245,3 +247,21 @@ class TemplateEditor(ctk.CTkToplevel):
             btn = ctk.CTkButton(frame, text=f"${ph}$", width=180, height=26,
                                 font=ctk.CTkFont(size=11), command=insert)
             btn.pack(pady=1, anchor="w")
+
+
+    def _safe_after(self, delay, callback):
+        after_id = self.after(delay, callback)
+        self._after_ids.add(after_id)
+        return after_id
+
+    def _cancel_all_afters(self):
+        for after_id in list(self._after_ids):
+            try:
+                self.after_cancel(after_id)
+            except Exception:
+                pass
+            self._after_ids.discard(after_id)
+
+    def on_close(self):
+        self._cancel_all_afters()
+        self.destroy()

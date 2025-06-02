@@ -3,6 +3,7 @@ import customtkinter as ctk
 class SettingsWindow(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
+        self._after_ids = set()  
         self.title("Configurações")
         # Não define geometry fixa!
         self.master = master
@@ -28,8 +29,8 @@ class SettingsWindow(ctk.CTkToplevel):
         # Atualiza o texto do switch conforme o valor
         def update_switch_text():
             self.appearance_switch.configure(text="Modo Escuro" if self.appearance_var.get() == "dark" else "Modo Claro")
-        self.appearance_var.trace_add("write", lambda *a: update_switch_text())
-        update_switch_text()
+        self.appearance_var.trace_add("write", lambda *a: self._safe_after(0, update_switch_text))
+        self._safe_after(0, update_switch_text)
 
         # Temas disponíveis (padrão + arquivos .json em /themes)
         self.theme_var = ctk.StringVar(value=master.theme_name)
@@ -92,4 +93,22 @@ class SettingsWindow(ctk.CTkToplevel):
 
         # Reconstrói toda a interface principal, preservando o estado
         self.master.reload_theme_and_interface()
+        self.destroy()
+
+
+    def _safe_after(self, delay, callback):
+        after_id = self.after(delay, callback)
+        self._after_ids.add(after_id)
+        return after_id
+
+    def _cancel_all_afters(self):
+        for after_id in list(self._after_ids):
+            try:
+                self.after_cancel(after_id)
+            except Exception:
+                pass
+            self._after_ids.discard(after_id)
+
+    def on_close(self):
+        self._cancel_all_afters()
         self.destroy()
