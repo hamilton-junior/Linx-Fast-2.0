@@ -380,6 +380,8 @@ class TemplateApp(ctk.CTk):
                 entry.bind("<FocusIn>", lambda e, fn=field_name: to_textbox(fn))
                 if val and getattr(current_widget, "border_color", None) == "red":
                     self.animate_field_success(entry)
+                # Redimensiona a janela ao voltar para Entry
+                self.adjust_window_height()
 
             # Intercepta TAB e Shift+TAB no Entry ANTES de expandir
             def on_entry_tab(event, fn=name):
