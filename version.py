@@ -1,0 +1,2 @@
+VERSION = "dev"
+BUILD_DATE = "2025-07-04 13:17"

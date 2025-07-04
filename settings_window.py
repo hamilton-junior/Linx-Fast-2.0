@@ -1,4 +1,8 @@
 import customtkinter as ctk
+try:
+    from version import VERSION, BUILD_DATE
+except ImportError:
+    VERSION, BUILD_DATE = "dev", "dev"
 
 class SettingsWindow(ctk.CTkToplevel):
     def __init__(self, master):
@@ -9,6 +13,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.master = master
         self.expandable_fields = set(master.expandable_fields)
         self.check_vars = {}
+
 
         # Aparência e tema
         theme_frame = ctk.CTkFrame(self)
@@ -59,6 +64,52 @@ class SettingsWindow(ctk.CTkToplevel):
             chk = ctk.CTkCheckBox(frame, text=field, variable=var)
             chk.pack(anchor="w", pady=2)
             self.check_vars[field] = var
+
+        # --- Label de versão acima dos botões, com tooltip de data do build ---
+        version_frame = ctk.CTkFrame(self, fg_color="transparent")
+        version_frame.pack(fill="x", pady=(0, 2), padx=8)
+        label_version = ctk.CTkLabel(
+            version_frame,
+            text=f"{VERSION}",
+            font=ctk.CTkFont(size=10, slant="italic"),
+            text_color="#888888",
+            anchor="e",
+            justify="right"
+        )
+        label_version.pack(side="right", padx=(0, 10), anchor="se")
+
+        # Tooltip customizado para mostrar a data do build
+        def show_tooltip(event=None):
+            if hasattr(label_version, "_tooltip") and label_version._tooltip is not None:
+                return
+            tooltip = ctk.CTkToplevel(label_version)
+            tooltip.overrideredirect(True)
+            tooltip.attributes("-topmost", True)
+            tooltip_label = ctk.CTkLabel(
+                tooltip,
+                text=f"Build: {BUILD_DATE}",
+                font=ctk.CTkFont(size=11),
+                text_color="#fff",
+                fg_color="#222",
+                padx=7, pady=3
+            )
+            tooltip_label.pack()
+            label_version.update_idletasks()
+            x = label_version.winfo_rootx() + label_version.winfo_width() + 7
+            y = label_version.winfo_rooty() - 3
+            tooltip.geometry(f"+{x}+{y}")
+            label_version._tooltip = tooltip
+
+        def hide_tooltip(event=None):
+            if hasattr(label_version, "_tooltip") and label_version._tooltip is not None:
+                try:
+                    label_version._tooltip.destroy()
+                except Exception:
+                    pass
+                label_version._tooltip = None
+
+        label_version.bind("<Enter>", show_tooltip)
+        label_version.bind("<Leave>", hide_tooltip)
 
         btn_frame = ctk.CTkFrame(self)
         btn_frame.pack(fill="x", pady=(10, 16), padx=8)  # padding extra para evitar corte

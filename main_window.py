@@ -12,6 +12,11 @@ from dpm import DailyPasswordManager
 from settings_window import SettingsWindow
 from customtkinter import CTkInputDialog
 
+try:
+    from version import VERSION, COMMIT, BUILD_DATE
+except ImportError:
+    VERSION, COMMIT, BUILD_DATE = "dev", "dev", "dev"
+
 # --- PlaceholderEngine e instância global ---
 class PlaceholderEngine:
     """
@@ -226,6 +231,121 @@ class TemplateApp(ctk.CTk):
 
         self.main_frame.grid_rowconfigure(100, weight=0)
 
+        self._init_undo_redo()
+        self._bind_undo_redo_shortcuts()
+
+    # TODO: Mover métodos auxiliares para módulos separados (fields.py, visual_feedback.py, utils.py)
+    # TODO: Implementar feedback visual aprimorado nas próximas etapas
+
+    def _init_undo_redo(self):
+        self._undo_stack = []
+        self._redo_stack = []
+        self._undo_limit = 50  # Limite de histórico
+
+    def _get_fields_snapshot(self):
+        # Salva valores dos campos atuais
+        snapshot = {}
+        for k, v in self.entries.items():
+            try:
+                snapshot[k] = v.get()
+            except Exception:
+                try:
+                    snapshot[k] = v.get("1.0", "end-1c")
+                except Exception:
+                    snapshot[k] = ""
+        # Também salva ordem dos campos dinâmicos
+        snapshot["_dynamic_fields"] = list(self.dynamic_fields)
+        return snapshot
+
+    def _restore_fields_snapshot(self, snapshot):
+        self._restoring_undo_redo = True
+        try:
+            # Otimização: só redesenha tudo se a estrutura mudou
+            current_keys = list(self.entries.keys())
+            snapshot_keys = [k for k in snapshot.keys() if k != "_dynamic_fields"]
+
+            # Checa se a estrutura mudou (campos diferentes, ordem diferente, tipos diferentes)
+            structure_changed = (
+                current_keys != snapshot_keys or
+                any(
+                    (isinstance(self.entries.get(k), ctk.CTkTextbox) != isinstance(snapshot.get(k, ""), str) and "\n" in str(snapshot.get(k, "")))
+                    for k in snapshot_keys if k in self.entries
+                )
+            )
+
+            if "_dynamic_fields" in snapshot and self.dynamic_fields != list(snapshot["_dynamic_fields"]):
+                structure_changed = True
+
+            if structure_changed:
+                # Redesenha tudo (caso campos mudaram, ordem mudou, ou tipo mudou)
+                if "_dynamic_fields" in snapshot:
+                    self.dynamic_fields = list(snapshot["_dynamic_fields"])
+                self.draw_all_fields()
+                for k in self.entries:
+                    valor_antigo = snapshot.get(k, None)
+                    entry = self.entries[k]
+                    if valor_antigo not in (None, ""):
+                        if isinstance(entry, ctk.CTkTextbox):
+                            entry.delete("1.0", "end")
+                            entry.insert("1.0", valor_antigo)
+                        else:
+                            entry.delete(0, "end")
+                            entry.insert(0, valor_antigo)
+            else:
+                # Só restaura valores dos widgets existentes
+                for k, entry in self.entries.items():
+                    valor_antigo = snapshot.get(k, None)
+                    if valor_antigo is not None:
+                        if isinstance(entry, ctk.CTkTextbox):
+                            entry.delete("1.0", "end")
+                            entry.insert("1.0", valor_antigo)
+                        else:
+                            entry.delete(0, "end")
+                            entry.insert(0, valor_antigo)
+        finally:
+            self._restoring_undo_redo = False
+
+    def _push_undo(self):
+        if getattr(self, "_restoring_undo_redo", False):
+            return
+        if not hasattr(self, "_undo_stack"):
+            self._init_undo_redo()
+        snapshot = self._get_fields_snapshot()
+        if not self._undo_stack or self._undo_stack[-1] != snapshot:
+            self._undo_stack.append(snapshot)
+            if len(self._undo_stack) > self._undo_limit:
+                self._undo_stack.pop(0)
+        # Limpa o redo ao novo push
+        self._redo_stack.clear()
+
+    def undo_fields(self, event=None):
+        if not hasattr(self, "_undo_stack"):
+            self._init_undo_redo()
+        if len(self._undo_stack) > 1:
+            current = self._undo_stack.pop()
+            self._redo_stack.append(current)
+            snapshot = self._undo_stack[-1]
+            self._restore_fields_snapshot(snapshot)
+            self.show_snackbar("Desfeito!", toast_type="info")
+
+    def redo_fields(self, event=None):
+        if not hasattr(self, "_redo_stack"):
+            self._init_undo_redo()
+        if self._redo_stack:
+            snapshot = self._redo_stack.pop()
+            self._restoring_undo_redo = True
+            try:
+                self._restore_fields_snapshot(snapshot)
+                self._undo_stack.append(snapshot)
+            finally:
+                self._restoring_undo_redo = False
+            self.show_snackbar("Refeito!", toast_type="info")
+
+    def _bind_undo_redo_shortcuts(self):
+        self.bind_all("<Control-z>", self.undo_fields)
+        self.bind_all("<Control-y>", self.redo_fields)
+
+
     # TODO: Mover métodos auxiliares para módulos separados (fields.py, visual_feedback.py, utils.py)
     # TODO: Implementar undo/redo e feedback visual aprimorado nas próximas etapas
 
@@ -256,6 +376,9 @@ class TemplateApp(ctk.CTk):
             row += 1
 
         self._safe_after(100, self.adjust_window_height)
+        # Só salva snapshot se não estiver restaurando undo/redo
+        if not getattr(self, "_restoring_undo_redo", False):
+            self._push_undo()
 
 
     def _should_wrap_label(self, text):
@@ -325,6 +448,7 @@ class TemplateApp(ctk.CTk):
             entry.grid(row=0, column=1, sticky="ew")
             entry.original_border_color = entry.cget("border_color")
             self.entries[name] = entry
+            
 
             def to_textbox(field_name=name, val=None, border_color=None):
                 current_widget = self.entries[field_name]
@@ -345,6 +469,8 @@ class TemplateApp(ctk.CTk):
                 textbox.border_color = border_color
                 textbox.focus()
                 textbox.bind("<FocusOut>", lambda e, fn=field_name: to_entry(fn))
+                # Undo/redo: salva snapshot a cada digitação
+                textbox.bind("<KeyRelease>", lambda e: self._push_undo())
                 # TAB navega para o próximo campo (transforma em Entry antes de avançar)
                 def on_tab(e, fn=field_name):
                     to_entry(fn)
@@ -378,10 +504,12 @@ class TemplateApp(ctk.CTk):
                     entry.delete(0, "end")
                     entry.configure(placeholder_text=field_name)
                 entry.bind("<FocusIn>", lambda e, fn=field_name: to_textbox(fn))
+                entry.bind("<KeyRelease>", lambda e: self._push_undo())
                 if val and getattr(current_widget, "border_color", None) == "red":
                     self.animate_field_success(entry)
                 # Redimensiona a janela ao voltar para Entry
                 self.adjust_window_height()
+
 
             # Intercepta TAB e Shift+TAB no Entry ANTES de expandir
             def on_entry_tab(event, fn=name):
@@ -495,6 +623,7 @@ class TemplateApp(ctk.CTk):
                 entry.border_color = entry.original_border_color
                 entry.configure(border_color=entry.original_border_color)
                 entry.border_color = entry.original_border_color
+                entry.bind("<KeyRelease>", lambda e: self._push_undo())
 
         if is_dynamic:
             btn_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
@@ -547,26 +676,45 @@ class TemplateApp(ctk.CTk):
 
 
     def move_field(self, field, direction):
-            idx = self.dynamic_fields.index(field)
-            new_idx = idx + direction
-            if 0 <= new_idx < len(self.dynamic_fields):
-                self.dynamic_fields[idx], self.dynamic_fields[new_idx] = self.dynamic_fields[new_idx], self.dynamic_fields[idx]
-                self.draw_all_fields()
-                self.save_field_order()
+        self._push_undo()
+        idx = self.dynamic_fields.index(field)
+        new_idx = idx + direction
+        if 0 <= new_idx < len(self.dynamic_fields):
+            self.dynamic_fields[idx], self.dynamic_fields[new_idx] = self.dynamic_fields[new_idx], self.dynamic_fields[idx]
+            self.draw_all_fields()
+            self.save_field_order()
 
     def remove_field(self, field):
+        self._push_undo()
         if field in self.dynamic_fields:
             self.dynamic_fields.remove(field)
             self.draw_all_fields()
             self.save_field_order()
 
     def prompt_new_field(self):
+        self._push_undo()
         popup = CTkInputDialog(text="Nome do novo campo (placeholder):", title="Adicionar Campo")
         field_name = popup.get_input()
         if field_name and field_name not in self.entries:
             self.dynamic_fields.append(field_name)
             self.draw_all_fields()
             self.save_field_order()
+
+    def limpar_campos(self):
+        self._push_undo()
+        for name, entry in self.entries.items():
+            if isinstance(entry, ctk.CTkTextbox):
+                entry.delete("1.0", "end")
+                entry.insert("1.0", "")
+                entry.configure(border_color=entry.original_border_color)
+            else:
+                entry.delete(0, "end")
+                entry.insert(0, "")
+                entry.configure(placeholder_text=name)
+                entry.configure(border_color=entry.original_border_color)
+
+        self.show_snackbar("Campos limpos!", toast_type="info")
+
 
     def focus_next_field(self, current_name):
         keys = list(self.entries.keys())
@@ -908,21 +1056,6 @@ class TemplateApp(ctk.CTk):
             self._safe_after(10, on_complete)
 
 
-    def limpar_campos(self):
-        for name, entry in self.entries.items():
-            if isinstance(entry, ctk.CTkTextbox):
-                entry.delete("1.0", "end")
-                entry.insert("1.0", "")
-                entry.configure(border_color=entry.original_border_color)
-            else:
-                entry.delete(0, "end")
-                entry.insert(0, "")
-                entry.configure(placeholder_text=name)
-                entry.configure(border_color=entry.original_border_color)
-
-        self.show_snackbar("Campos limpos!", toast_type="info")
-
-
     def pulse_window(self, times=5, offset=3, delay=5):
         x, y = self.winfo_x(), self.winfo_y()
         def animate(count):
@@ -1019,6 +1152,9 @@ class TemplateApp(ctk.CTk):
         return re.sub(r"\$([a-zA-Z0-9 _\-çÇáéíóúãõâêîôûÀ-ÿ\[\]%:/\?\|]+)\$", cond_replacer, template)
 
 
+    # Mantém uma lista global de tooltips abertos para garantir que todos sejam fechados ao passar o mouse novamente
+    _all_tooltips = []
+
     def create_tooltip(self, widget, text, fg_color="#222", text_color="#fff", immediate_hide=True):
         """
         Attach a custom tooltip to a widget. The tooltip appears on hover and disappears on leave.
@@ -1032,7 +1168,20 @@ class TemplateApp(ctk.CTk):
         """
         tooltip = {"window": None, "after_ids": set()}
 
+        def destroy_all_tooltips():
+            # Fecha todos os tooltips abertos em toda a aplicação
+            for t in list(TemplateApp._all_tooltips):
+                try:
+                    t.destroy()
+                except Exception:
+                    pass
+                try:
+                    TemplateApp._all_tooltips.remove(t)
+                except Exception:
+                    pass
+
         def show_tooltip(event=None):
+            destroy_all_tooltips()
             hide_tooltip()
             if tooltip["window"] is not None:
                 return
@@ -1059,6 +1208,8 @@ class TemplateApp(ctk.CTk):
                     hide_tooltip()
                 widget.bind("<Destroy>", on_widget_destroy, add="+")
                 tw.bind("<Destroy>", on_widget_destroy, add="+")
+                # Adiciona à lista global
+                TemplateApp._all_tooltips.append(tw)
             except Exception:
                 pass
 
@@ -1072,6 +1223,8 @@ class TemplateApp(ctk.CTk):
                 tooltip["after_ids"].discard(after_id)
             if tooltip["window"] is not None:
                 try:
+                    if tooltip["window"] in TemplateApp._all_tooltips:
+                        TemplateApp._all_tooltips.remove(tooltip["window"])
                     tooltip["window"].destroy()
                 except Exception:
                     pass
@@ -1094,17 +1247,11 @@ class TemplateApp(ctk.CTk):
                 tooltip["after_ids"].discard(after_id)
 
         widget.bind("<Enter>", show_tooltip)
-        if immediate_hide:
-            widget.bind("<Leave>", hide_tooltip)
-            widget.bind("<ButtonPress>", hide_tooltip)
-            widget.bind("<FocusOut>", hide_tooltip)
-        else:
-            widget.bind("<Leave>", force_hide_tooltip)
-            widget.bind("<ButtonPress>", force_hide_tooltip)
-            widget.bind("<FocusOut>", force_hide_tooltip)
-        widget.bind("<Destroy>", cancel_tooltip_on_app_close)
-        if hasattr(self, "bind"):
-            self.bind("<Destroy>", cancel_tooltip_on_app_close)
+        widget.bind("<Leave>", force_hide_tooltip)
+        widget.bind("<ButtonPress>", force_hide_tooltip)
+        widget.bind("<FocusOut>", force_hide_tooltip)
+        self.bind("<Destroy>", cancel_tooltip_on_app_close, add="+")
+        return show_tooltip, hide_tooltip
 
 
     def animate_field_success(self, entry):
