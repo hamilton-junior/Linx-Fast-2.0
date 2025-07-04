@@ -13,10 +13,13 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self._after_ids = set()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.manager = manager
-        self.theme_manager = ThemeManager()
+        # Não instancia ThemeManager para alterar modo de aparência!
+        self.theme_manager = ThemeManager(theme_name=getattr(master, "theme_name", "green"))
         self.geometry("325x250")
         self.entries = {}
 
+        # Corrige o modo de aparência do popup para ser igual ao app principal
+        # Não altera o modo de aparência aqui! Apenas no _build_interface, e só se necessário.
         self.template_var = StringVar(value="")
         self._build_interface()
 
@@ -24,6 +27,22 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self.grid_columnconfigure(0, weight=0)  # coluna do botão pin
         self.grid_columnconfigure(1, weight=1)  # coluna do dropdown expansível
         self.grid_columnconfigure(2, weight=0)  # coluna do toggle
+
+        # Garante que o tema e o modo de aparência do popup sejam iguais ao do app principal
+        try:
+            # Aplica o tema de cores (isso é seguro, pois só afeta o tema de cor, não o modo claro/escuro)
+            if hasattr(self.master, "theme_name"):
+                theme = self.master.theme_name
+                import os
+                theme_path = os.path.join("themes", f"{theme}.json")
+                if theme in ("green", "blue", "dark-blue") or not os.path.exists(theme_path):
+                    ctk.set_default_color_theme(theme)
+                else:
+                    ctk.set_default_color_theme(theme_path)
+            # NÃO ALTERA O MODO DE APARÊNCIA GLOBAL!
+            # O popup herda o modo de aparência do app principal automaticamente.
+        except Exception:
+            pass
 
         # Título
         title = ctk.CTkLabel(self, text="Selecionar Template", font=("Arial", 14, "bold"))

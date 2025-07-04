@@ -10,8 +10,9 @@ class ThemeManager:
         self.themes_dir = "themes"
         os.makedirs(self.themes_dir, exist_ok=True)
 
+        # Apenas define o tema de cor ao iniciar, não altera o modo de aparência global!
         self.set_theme(self.theme_name)
-        self.set_appearance_mode(self.mode)
+        # NÃO chama set_appearance_mode aqui!
 
     def set_theme(self, theme_name):
         theme_path = os.path.join(self.themes_dir, f"{theme_name}.json")
@@ -22,6 +23,7 @@ class ThemeManager:
         self.theme_name = theme_name
 
     def set_appearance_mode(self, mode):
+        # Só altera o modo global se explicitamente chamado
         ctk.set_appearance_mode(mode)
         self.mode = mode
 

@@ -66,7 +66,12 @@ class SettingsWindow(ctk.CTkToplevel):
             self.check_vars[field] = var
 
         # --- Label de versão acima dos botões, com tooltip de data do build ---
-        version_frame = ctk.CTkFrame(self, fg_color="transparent")
+        # Calcula largura do texto da versão para ajustar o frame
+        import tkinter.font as tkFont
+        font = tkFont.Font(family="Arial", size=10, slant="italic")
+        text_width = font.measure(str(VERSION)) + 40  # 40px extra para padding e ícone de tooltip
+
+        version_frame = ctk.CTkFrame(self, fg_color="transparent", width=text_width)
         version_frame.pack(fill="x", pady=(0, 2), padx=8)
         label_version = ctk.CTkLabel(
             version_frame,
@@ -74,9 +79,13 @@ class SettingsWindow(ctk.CTkToplevel):
             font=ctk.CTkFont(size=10, slant="italic"),
             text_color="#888888",
             anchor="e",
-            justify="right"
+            justify="right",
+            width=text_width
         )
         label_version.pack(side="right", padx=(0, 10), anchor="se")
+        version_frame.update_idletasks()
+        # Ajusta largura mínima do frame para caber o texto
+        version_frame.configure(width=max(label_version.winfo_reqwidth() + 20, text_width))
 
         # Tooltip customizado para mostrar a data do build
         def show_tooltip(event=None):
