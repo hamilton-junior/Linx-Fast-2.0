@@ -9,7 +9,11 @@ def get_git_version():
         commit_count = "0"
     try:
         # Pega o último tag anotado (ex: hotfix). Se não houver, retorna "fast"
-        tag = subprocess.check_output(["git", "describe", "--tags", "--abbrev=0"], encoding="utf-8").strip()
+        tag = subprocess.check_output(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            stderr=subprocess.DEVNULL,  # suprime o erro no terminal
+            encoding="utf-8"
+        ).strip()
     except Exception:
         tag = "fast"
     date = datetime.datetime.now().strftime("%d-%m-%Y %H:%M")

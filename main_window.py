@@ -5,12 +5,14 @@ import os
 import re
 import datetime
 import sys
+import requests
 from template_editor import TemplateEditor
 from template_manager import TemplateManager
 from theme_manager import ThemeManager
 from dpm import DailyPasswordManager
 from settings_window import SettingsWindow
 from customtkinter import CTkInputDialog
+from nocodb_api import fetch_nocodb_templates
 
 try:
     from version import VERSION, COMMIT, BUILD_DATE
@@ -206,10 +208,21 @@ class TemplateApp(ctk.CTk):
         # --- Frame inferior para label de crédito e botão de config alinhados ---
         bottom_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         bottom_frame.grid(row=100, column=0, sticky="ew", pady=(8, 2), padx=0)
-        bottom_frame.grid_columnconfigure(0, weight=1)
-        bottom_frame.grid_columnconfigure(1, weight=0)
+        bottom_frame.grid_columnconfigure(0, weight=0)  # Botão bug
+        bottom_frame.grid_columnconfigure(1, weight=1)  # Label centralizada
+        bottom_frame.grid_columnconfigure(2, weight=0)  # Botão config
 
-        # Label de Créditos do Autor centralizada
+        # Botão de Bug (esquerda)
+        self.bug_button = ctk.CTkButton(
+            bottom_frame,
+            text="🐞",
+            width=32,
+            anchor="sw",
+            command=self.on_bug_button_click
+        )
+        self.bug_button.grid(row=0, column=0, sticky="w", padx=(8, 2))
+
+        # Label de Créditos do Autor (centralizada)
         label_autor = ctk.CTkLabel(
             bottom_frame,
             text="By Hamilton Junior",
@@ -218,21 +231,28 @@ class TemplateApp(ctk.CTk):
             anchor="center",
             justify="center"
         )
-        label_autor.grid(row=0, column=0, sticky="ew", padx=(2, 5))
+        label_autor.grid(row=0, column=1, sticky="ew", padx=(2, 2))
 
-        # Botão de Configurações
-        ctk.CTkButton(
+        # Botão de Configurações (direita)
+        self.settings_button = ctk.CTkButton(
             bottom_frame,
             text="⚙️",
             width=32,
-            anchor="e",
+            anchor="se",
             command=self.open_settings
-        ).grid(row=0, column=1, sticky="e", padx=(5, 8))
+        )
+        self.settings_button.grid(row=0, column=2, sticky="e", padx=(2, 8))
+
 
         self.main_frame.grid_rowconfigure(100, weight=0)
 
         self._init_undo_redo()
         self._bind_undo_redo_shortcuts()
+
+    def on_bug_button_click(self):
+        # Aqui você pode definir a ação do botão de bug, por exemplo, abrir um popup ou enviar feedback
+        import tkinter.messagebox
+        tkinter.messagebox.showinfo("Bug Report", "Funcionalidade de relatório de bug em desenvolvimento!")
 
     # TODO: Mover métodos auxiliares para módulos separados (fields.py, visual_feedback.py, utils.py)
     # TODO: Implementar feedback visual aprimorado nas próximas etapas
@@ -1067,11 +1087,189 @@ class TemplateApp(ctk.CTk):
             self._safe_after(delay, lambda: animate(count - 1))
         animate(times)
 
+    def fetch_nocodb_templates(self, api_url, base_name, table_name, token):
+        """
+        Busca todos os templates do NocoDB via API REST, trazendo todos os registros.
+        """
+        import requests
+        headers = {
+            "xc-token": token,
+            "accept": "application/json"
+        }
+        # Busca todos os registros (até 1000) usando pageSize
+        url = f"{api_url}/api/v1/db/data/v1/{base_name}/{table_name}?pageSize=1000"
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            # Mostra todos os registros para depuração
+            if data.get("list"):
+                print(f"[NocoDB] {len(data['list'])} registros retornados.")
+                for i, reg in enumerate(data["list"]):
+                    print(f"  [{i+1}] {reg}")
+            else:
+                print("[NocoDB] Nenhum registro encontrado.")
+            return data.get("list", [])
+        except Exception as e:
+            # Se a resposta da API tiver texto, printa no console
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    print("[NocoDB API ERROR]", e.response.text)
+                except Exception:
+                    print("[NocoDB API ERROR] (sem texto de resposta)")
+            else:
+                print("[NocoDB API ERROR]", str(e))
+            self.show_snackbar("Erro ao buscar templates. Veja o console para detalhes.", toast_type="error")
+            return []
+
+    def importar_template(self, template):
+        """
+        Importa o template selecionado do NocoDB para o app.
+        """
+        # Extrai os campos conforme a tabela NocoDB
+        nome = template.get("Template Name")
+        conteudo = template.get("Template Description")
+        nocodb_id = template.get("Id") or template.get("id") or template.get("ID")
+        if not nome or not conteudo:
+            self.show_snackbar("Template inválido!", toast_type="error")
+            return
+        # Adiciona ao gerenciador de templates local
+        self.template_manager.add_template(nome, conteudo)
+        # Salva o ID único do NocoDB no meta.json
+        if nocodb_id:
+            self.template_manager.meta._ensure_entry(nome)
+            self.template_manager.meta.meta[nome]["nocodb_id"] = str(nocodb_id)
+            self.template_manager.meta._save()
+        self.show_snackbar(f"Template '{nome}' importado!", toast_type="success",duration=2500)
+        # Atualiza a lista de templates na interface
+        self.template_manager.load_templates()
+        self.template_selector.configure(values=self.template_manager.get_display_names())
+
+    def show_nocodb_templates(self):
+        import customtkinter as ctk
+
+        print("[LOG] Botão Teste NocoDB pressionado.")
+        self.show_snackbar("Botão Teste NocoDB pressionado!", toast_type="info")
+
+        # Cria a janela principal do diálogo
+        nocodb_templates_dialog = ctk.CTkToplevel(self)
+        nocodb_templates_dialog.title("Templates Compartilhados")
+        nocodb_templates_dialog.geometry("700x500")
+        nocodb_templates_dialog.grab_set()
+
+        # Frame principal
+        main_frame = ctk.CTkFrame(nocodb_templates_dialog)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # OptionMenu para seleção
+        nocodb_templates_list = ctk.CTkOptionMenu(main_frame, width=80)
+        nocodb_templates_list.grid(row=0, column=0, sticky="ew", padx=(0, 20), pady=(0, 10))
+
+        # Card fixo (não expansível)
+        card_frame = ctk.CTkFrame(main_frame, fg_color="#222", corner_radius=10)
+        card_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 20), pady=(0, 10))
+        main_frame.grid_rowconfigure(1, weight=1)
+        main_frame.grid_columnconfigure(0, weight=1)
+
+        # Nome do template (expansível)
+        label_nome = ctk.CTkTextbox(card_frame, height=1, font=ctk.CTkFont(size=16, weight="bold"), wrap="word")
+        label_nome.pack(fill="x", padx=16, pady=(16, 2))
+        label_nome.configure(state="disabled", border_width=0, fg_color="#222", text_color="#fff")
+
+        # Descrição (sempre visível, com quebras de linha, expansível)
+        desc_box = ctk.CTkTextbox(card_frame, wrap="word", height=1, font=ctk.CTkFont(size=13))
+        desc_box.pack(fill="both", expand=True, padx=16, pady=(0, 2))
+        desc_box.configure(state="disabled", border_width=0, fg_color="#222", text_color="#fff")
+
+        # Linha separadora para detalhes extras
+        sep = ctk.CTkFrame(card_frame, height=2, fg_color="#444")
+        sep.pack(fill="x", padx=16, pady=(8, 4))
+
+        # Rodapé do card (autor, criado, atualizado) em uma linha, todos como labels
+        footer_frame = ctk.CTkFrame(card_frame, fg_color="#222")
+        footer_frame.pack(fill="x", side="bottom", padx=8, pady=(0, 12))
+
+        label_teams = ctk.CTkLabel(footer_frame, text="", font=ctk.CTkFont(size=12, slant="italic"), anchor="w", justify="left")
+        label_teams.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=0)
+
+        label_created = ctk.CTkLabel(footer_frame, text="", font=ctk.CTkFont(size=11), anchor="w", justify="left")
+        label_created.pack(side="left", fill="x", expand=True, padx=(0, 8), pady=0)
+
+        label_updated = ctk.CTkLabel(footer_frame, text="", font=ctk.CTkFont(size=11), anchor="w", justify="left")
+        label_updated.pack(side="left", fill="x", expand=True, padx=(0, 0), pady=0)
+
+        # Botão de importar
+        btn_importar = ctk.CTkButton(main_frame, text="Importar", fg_color="#388E3C")
+        btn_importar.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+
+        # --- Lógica de preenchimento e seleção ---
+        api_url = "https://app.nocodb.com"
+        base_name = "p02k6lvq2via5sv"
+        table_name = "Templates"
+        token = 'UifsYUdNbfJFWVz3t7oOIPo2Idd51ykk2I-9FnzK'
+
+        templates = self.fetch_nocodb_templates(api_url, base_name, table_name, token)
+        if not templates:
+            print("[NocoDB] Nenhum template retornado ou erro na consulta.")
+
+        opcoes = []
+        for template in templates:
+            nome = template.get("Template Name", "")
+            opcoes.append(nome)
+
+        if opcoes:
+            nocodb_templates_list.configure(values=opcoes)
+            nocodb_templates_list.set(opcoes[0])
+        else:
+            nocodb_templates_list.configure(values=["Nenhum template"])
+            nocodb_templates_list.set("Nenhum template")
+
+        def mostrar_card(nome_template):
+            idx = opcoes.index(nome_template) if nome_template in opcoes else 0
+            template = templates[idx] if templates else {}
+
+            # Nome sempre visível (expansível)
+            label_nome.configure(state="normal")
+            label_nome.delete("1.0", "end")
+            label_nome.insert("1.0", template.get("Template Name", ""))
+            label_nome.configure(state="disabled")
+
+            # Descrição no textbox, com quebras de linha preservadas (expansível)
+            desc = template.get("Template Description", "")
+            desc_box.configure(state="normal")
+            desc_box.delete("1.0", "end")
+            desc_box.insert("1.0", desc)
+            desc_box.configure(state="disabled")
+
+            # Rodapé: autor, criado, atualizado (labels, sempre expandidos)
+            label_teams.configure(text=f"Autor: {template.get('Teams', '')}")
+            label_created.configure(text=f"Criado em: {template.get('CreatedAt', '')}")
+            updated = template.get('UpdatedAt', '')
+            if not updated or str(updated).strip() == "" or updated == template.get('CreatedAt', ''):
+                label_updated.configure(text="Atualizado em: Nunca - Template Original")
+            else:
+                label_updated.configure(text=f"Atualizado em: {updated}")
+
+        def importar_template():
+            selecionado = nocodb_templates_list.get()
+            if selecionado and selecionado in opcoes:
+                idx = opcoes.index(selecionado)
+                template = templates[idx]
+                self.importar_template(template)
+                nocodb_templates_dialog.destroy()
+
+        nocodb_templates_list.configure(command=mostrar_card)
+        btn_importar.configure(command=importar_template)
+
+        # Mostra o card do primeiro template ao abrir
+        if opcoes:
+            mostrar_card(opcoes[0])
+
+
     def show_snackbar(self, message="Copiado com sucesso!", duration=1500, toast_type="success"):
         styles = {
             "success": {"fg": "#388E3C", "icon": "✔"},
             "error": {"fg": "#D32F2F", "icon": "✖"},
-            "warning": {"fg": "#D4A326", "icon": "⚠"},
             "warning": {"fg": "#D4A326", "icon": "⚠"},
             "info": {"fg": "#1976D2", "icon": "ℹ"},
             "default": {"fg": "#AE00FF", "icon": "•"},
@@ -1124,7 +1322,6 @@ class TemplateApp(ctk.CTk):
         Se o campo estiver preenchido, usa Texto (pode conter outros placeholders).
         Se não, usa Alternativa (pode conter outros placeholders).
         """
-        import re
 
         def cond_replacer(match):
             field = match.group(1)

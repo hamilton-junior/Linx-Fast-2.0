@@ -48,6 +48,15 @@ class TemplateEditor(ctk.CTkToplevel):
         self.content_box.grid(row=1, column=0, columnspan=4, sticky="nsew", padx=10, pady=(5, 5))
         self.content_box.bind("<Control-space>", self.show_autocomplete)
 
+        # Botão de importar do NocoDB acima da lista de variáveis (pequeno, igual aos outros)
+        ctk.CTkButton(
+            self,
+            text="Importar",
+            width=1,
+            font=ctk.CTkFont(size=12),
+            command=self.master.show_nocodb_templates
+        ).grid(row=0, column=4, padx=(10, 10), pady=(10, 0), sticky="ne")
+
         self.placeholder_box = ctk.CTkTextbox(self, width=240)
         self.placeholder_box.grid(row=1, column=4, sticky="ns", padx=(5, 10), pady=(5, 5))
         self.placeholder_box.configure(state="disabled")
