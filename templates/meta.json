@@ -1,13 +1,21 @@
 {
-  "Suporte / Abertura de Chamado": {
-    "favorito": true,
-    "protegido": false
-  },
   "Suporte / Conclusão": {
     "favorito": true,
-    "protegido": false
+    "protegido": false,
+    "nocodb_id": "2"
   },
-  "Suporte / Falta de interação": {
+  "Suporte / Encerramento - Chamado Sem Interação": {
+    "favorito": true,
+    "protegido": false,
+    "nocodb_id": "3"
+  },
+  "Suporte / Falta de Interação": {
+    "favorito": true,
+    "protegido": false,
+    "nocodb_id": "4"
+  },
+  "Suporte / Abertura de Chamado": {
+    "nocodb_id": "1",
     "favorito": true,
     "protegido": false
   }

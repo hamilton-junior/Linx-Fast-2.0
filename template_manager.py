@@ -42,7 +42,14 @@ class TemplateManager:
             if os.path.exists(old_path):
                 os.remove(old_path)
             del self.templates[old_name]
-            self.meta.rename_meta(old_name, new_name)
+            # Copia todos os campos do meta antigo para o novo nome, mantendo a id e outros dados
+            if old_name in self.meta.meta:
+                old_meta = self.meta.meta[old_name].copy()
+                self.meta.meta[new_name] = old_meta
+                self.meta._save()
+                self.meta.remove_meta(old_name)
+            else:
+                self.meta.rename_meta(old_name, new_name)
 
         self.templates[new_name] = content
         with open(self._template_path(new_name), "w", encoding="utf-8") as f:
