@@ -127,6 +127,10 @@ class TemplateApp(ctk.CTk):
         self._build_main_interface()
         self.load_template_placeholders()
 
+        # Garante largura mínima para caber todos os botões e campos
+        self.update_idletasks()
+        self.minsize(392, 525)  # 392px cobre selector + botões + paddings
+
         self._safe_after(0, self.apply_saved_geometry)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -143,9 +147,9 @@ class TemplateApp(ctk.CTk):
             text="📍",
             command=self.toggle_always_on_top,
             width=30
-            )
+        )
         self.pin_button.pack(side="left", padx=(0, 5))
-        
+
         self.template_selector = ctk.CTkOptionMenu(
             selector_frame,
             variable=self.current_template_display,
@@ -154,6 +158,16 @@ class TemplateApp(ctk.CTk):
             width=300
         )
         self.template_selector.pack(side="left")
+
+        # Botão de Configurações ao lado do seletor de template
+        self.settings_button = ctk.CTkButton(
+            selector_frame,
+            text="⚙️",
+            width=32,
+            anchor="center",
+            command=self.open_settings
+        )
+        self.settings_button.pack(side="left", padx=(5, 0))
 
         self.form_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.form_frame.grid(row=1, column=0, sticky="nsew")
@@ -205,22 +219,22 @@ class TemplateApp(ctk.CTk):
                         fg_color="#5E35B1", hover_color="#4527A0",
                         command=self.open_quick_mode).grid(row=6, column=0, pady=(5, 5))
 
-        # --- Frame inferior para label de crédito e botão de config alinhados ---
+        # --- Frame inferior para label de crédito e botão de info alinhados ---
         bottom_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        bottom_frame.grid(row=100, column=0, sticky="ew", pady=(8, 2), padx=0)
-        bottom_frame.grid_columnconfigure(0, weight=0)  # Botão bug
+        bottom_frame.grid(row=100, column=0, sticky="ew", pady=0, padx=0)
+        bottom_frame.grid_columnconfigure(0, weight=0)  # Espaço Vazio
         bottom_frame.grid_columnconfigure(1, weight=1)  # Label centralizada
-        bottom_frame.grid_columnconfigure(2, weight=0)  # Botão config
+        bottom_frame.grid_columnconfigure(2, weight=0)  # Botão Info
 
         # Botão de Bug (esquerda)
-        self.bug_button = ctk.CTkButton(
+        self.info_button = ctk.CTkButton(
             bottom_frame,
-            text="🐞",
+            text="?",
             width=32,
-            anchor="sw",
+            anchor="center",
             command=self.on_bug_button_click
         )
-        self.bug_button.grid(row=0, column=0, sticky="w", padx=(8, 2))
+        self.info_button.grid(row=0, column=2, sticky="w", padx=(8, 2))
 
         # Label de Créditos do Autor (centralizada)
         label_autor = ctk.CTkLabel(
@@ -228,20 +242,10 @@ class TemplateApp(ctk.CTk):
             text="By Hamilton Junior",
             font=ctk.CTkFont(size=10, slant="italic"),
             text_color="#888888",
-            anchor="center",
+            anchor="s",
             justify="center"
         )
         label_autor.grid(row=0, column=1, sticky="ew", padx=(2, 2))
-
-        # Botão de Configurações (direita)
-        self.settings_button = ctk.CTkButton(
-            bottom_frame,
-            text="⚙️",
-            width=32,
-            anchor="se",
-            command=self.open_settings
-        )
-        self.settings_button.grid(row=0, column=2, sticky="e", padx=(2, 8))
 
 
         self.main_frame.grid_rowconfigure(100, weight=0)
@@ -250,10 +254,56 @@ class TemplateApp(ctk.CTk):
         self._bind_undo_redo_shortcuts()
 
     def on_bug_button_click(self):
-        # Aqui você pode definir a ação do botão de bug, por exemplo, abrir um popup ou enviar feedback
-        import tkinter.messagebox
-        tkinter.messagebox.showinfo("Bug Report", "Funcionalidade de relatório de bug em desenvolvimento!")
+        # Abre uma janela com links para formulários do NocoDB e exibe uma imagem da pasta /assets/icons/images
+        import webbrowser
+        import os
 
+        links = [
+            ("Envio de Templates", "https://app.nocodb.com/#/nc/form/99e96b28-cb03-4710-9318-7b1d5849d9e0"),
+            ("Sugestões", "https://app.nocodb.com/#/nc/form/0058474a-0f28-4d3d-af60-1727a29ab431"),
+            ("Report-a-bug", "https://app.nocodb.com/#/nc/form/5dd88074-bbf3-457f-b105-816652c79ddf"),
+        ]
+
+        win = ctk.CTkToplevel(self)
+        win.title("Informações & Feedback")
+        win.geometry("250x285")
+        win.resizable(True, True)
+        win.transient(self)
+        win.grab_set()
+
+        # --- Exibe uma pequena imagem no topo ---
+        ctk.CTkLabel(win, text="Contribua com o app!", font=ctk.CTkFont(size=15, weight="bold")).pack(pady=(8, 8))
+
+        try:
+            from PIL import Image
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            img_path = os.path.join(base_dir, "assets", "images", "logo.png")
+            if os.path.exists(img_path):
+                pil_image = Image.open(img_path)
+                image = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=(64, 64))
+                ctk.CTkLabel(win, image=image, text="").pack(pady=(12, 2))
+        except Exception as e:
+            print(f"Erro ao carregar imagem: {e}")
+
+        for name, url in links:
+            def open_link(u=url):
+                webbrowser.open_new(u)
+            btn = ctk.CTkButton(
+                win,
+                text=name,
+                width=150,
+                command=open_link
+            )
+            btn.pack(pady=6)
+
+        ctk.CTkLabel(
+            win,
+            text="Ao enviar um formulário, gentileza informar seu email do Teams para facilitar o contato.",
+            font=ctk.CTkFont(size=10),
+            wraplength=245,
+            text_color="#888"
+        ).pack(pady=(10, 8))
+        
     # TODO: Mover métodos auxiliares para módulos separados (fields.py, visual_feedback.py, utils.py)
     # TODO: Implementar feedback visual aprimorado nas próximas etapas
 

@@ -30,16 +30,10 @@ REM Cria as pastas de saída se não existirem
 if not exist "%DIST_FOLDER%" mkdir "%DIST_FOLDER%"
 if not exist "%DESKTOP_SHORT%\build" mkdir "%DESKTOP_SHORT%\build"
 
-python -m PyInstaller --onefile --noconsole --icon="LinxFast2.ico" --add-data="templates;templates" --distpath="%DIST_FOLDER%" --workpath="%DESKTOP_SHORT%\build" --name="LinxFast2" app.py
+python -m PyInstaller --onefile --noconsole --icon="LinxFast2.ico" --add-data="templates;templates" --add-data="assets/images;assets/images" --distpath="%DIST_FOLDER%" --workpath="%DESKTOP_SHORT%\build" --name="LinxFast2" app.py
 
 REM Cria a pasta de versões, se não existir
 set "VERSIONS_FOLDER=%DESKTOP_SHORT%\Linx Fast 2.0 - Versões"
 if not exist "%VERSIONS_FOLDER%" mkdir "%VERSIONS_FOLDER%"
-
-REM Move e mescla o conteúdo da pasta de build para a pasta de versões (substitui arquivos se já existir)
-robocopy "%DIST_FOLDER%" "%VERSIONS_FOLDER%\%~nxDIST_FOLDER%" /E /MOVE /NFL /NDL /NJH /NJS /NP /R:1 /W:1
-
-REM Remove a pasta de origem se ainda existir (caso robocopy não tenha conseguido mover tudo)
-if exist "%DIST_FOLDER%" rmdir /s /q "%DIST_FOLDER%"
 
 pause
