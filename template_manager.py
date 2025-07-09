@@ -43,11 +43,15 @@ class TemplateManager:
                 os.remove(old_path)
             del self.templates[old_name]
             # Copia todos os campos do meta antigo para o novo nome, mantendo a id e outros dados
-            if old_name in self.meta.meta:
-                old_meta = self.meta.meta[old_name].copy()
-                self.meta.meta[new_name] = old_meta
+            # Garante que não fique duplicado no meta.json ao mover de pasta
+            old_meta_key = self.meta._find_meta_key(old_name)
+            new_meta_key = self.meta._canonical_name(new_name)
+            if old_meta_key in self.meta.meta:
+                old_meta = self.meta.meta[old_meta_key].copy()
+                self.meta.meta[new_meta_key] = old_meta
                 self.meta._save()
-                self.meta.remove_meta(old_name)
+                if old_meta_key != new_meta_key:
+                    self.meta.remove_meta(old_meta_key)
             else:
                 self.meta.rename_meta(old_name, new_name)
 

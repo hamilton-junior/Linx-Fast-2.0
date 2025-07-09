@@ -1170,6 +1170,26 @@ class TemplateApp(ctk.CTk):
             self.show_snackbar("Erro ao buscar templates. Veja o log para detalhes.", toast_type="error")
             return []
 
+    def _refresh_all_template_selectors(self):
+        # Atualiza todos os OptionMenus relevantes (main, editor, quick popup)
+        # Main selector
+        if hasattr(self, "template_selector"):
+            self.template_selector.configure(values=self.template_manager.get_display_names())
+        # Template Editor
+        for w in self.winfo_children():
+            if hasattr(w, "dropdown"):
+                try:
+                    w.dropdown.configure(values=self.template_manager.get_display_names())
+                except Exception:
+                    pass
+        # QuickTemplatePopup
+        for w in self.winfo_children():
+            if w.__class__.__name__ == "QuickTemplatePopup":
+                try:
+                    w.template_dropdown.configure(values=self.template_manager.get_template_names())
+                except Exception:
+                    pass
+
     def importar_template(self, template):
         """
         Importa o template selecionado do NocoDB para o app.
@@ -1181,6 +1201,9 @@ class TemplateApp(ctk.CTk):
         import os
 
         def prompt_pasta(categorias, pasta_atual=None):
+            # Garante que pasta_atual seja só o nome da pasta, nunca o nome completo do template
+            if pasta_atual and " / " in pasta_atual:
+                pasta_atual = pasta_atual.split(" / ", 1)[0]
             pasta_escolhida = [None]
             def abrir_nova_pasta():
                 win_nova = ctk.CTkToplevel(self)
@@ -1204,7 +1227,6 @@ class TemplateApp(ctk.CTk):
                         if cat.lower() == nome_pasta.lower():
                             info_label.configure(text="Esta pasta já existe! Retornando para seleção.")
                             win_nova.after(1200, win_nova.destroy)
-                            # Retorna para tela anterior já selecionando a pasta existente
                             pasta_escolhida[0] = cat
                             return
                     pasta_escolhida[0] = nome_pasta
@@ -1216,6 +1238,7 @@ class TemplateApp(ctk.CTk):
                 ctk.CTkButton(btn_frame, text="Confirmar", command=confirmar).pack(side="left", padx=10)
                 ctk.CTkButton(btn_frame, text="Cancelar", command=cancelar).pack(side="left", padx=10)
                 win_nova.wait_window()
+
             def escolher():
                 while True:
                     win = ctk.CTkToplevel(self)
@@ -1244,14 +1267,10 @@ class TemplateApp(ctk.CTk):
                         win.destroy()
                     ctk.CTkButton(btn_frame, text="Confirmar", command=confirmar).pack(side="left", padx=10)
                     win.wait_window()
-                    # Se o usuário tentou criar uma nova pasta que já existe, retorna para cá com pasta_escolhida[0] já preenchida
                     if pasta_escolhida[0] in categorias:
-                        # Seleciona a pasta já existente e retorna
                         return pasta_escolhida[0]
-                    # Se foi criada uma nova pasta válida, retorna
                     if pasta_escolhida[0] is not None:
                         return pasta_escolhida[0]
-                    # Se cancelou, retorna None
                     return None
             return escolher()
 
@@ -1373,23 +1392,64 @@ class TemplateApp(ctk.CTk):
         for name in duplicate_names:
             local_path = self.template_manager._template_path(name)
             if os.path.exists(local_path):
-                local_contents.append((name, self.template_manager.get_template(name)))
+                # Sempre lê o conteúdo diretamente do arquivo para garantir que está atualizado
+                with open(local_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                local_contents.append((name, content))
             else:
                 local_contents.append((name, ""))
 
         # Se todos os conteúdos são iguais ao do NocoDB, unifica para o nome do NocoDB
         all_equal = all(content == conteudo for _, content in local_contents)
         if duplicate_names and all_equal:
-            # Remove todos, mantém só o nome do NocoDB (na pasta escolhida)
-            for name, _ in local_contents:
-                if name != f"Geral / {nome}" and name != nome:
-                    self.template_manager.delete_template(name)
             # Pergunta a pasta
             pasta = prompt_pasta(categorias)
             if pasta is None:
                 self.show_snackbar("Importação cancelada.", toast_type="info")
                 return
             full_name = f"{pasta} / {nome}" if pasta != "Geral" else nome
+
+            # Se já existe apenas UM template local, com mesmo nome, conteúdo e pasta, não faz nada
+            if (
+                len(duplicate_names) == 1
+                and duplicate_names[0] == full_name
+                and self.template_manager.get_template(full_name) == conteudo
+            ):
+                self.show_snackbar("O template já existe e está atualizado. Nenhuma alteração foi necessária.", toast_type="info", duration=2500)
+                self.template_manager.load_templates()
+                self._refresh_all_template_selectors()
+                return
+
+            # --- NOVO: verifica se já existe template com mesmo conteúdo em outra pasta ---
+            same_content_names = []
+            for local_name in self.template_manager.templates:
+                local_content = self.template_manager.get_template(local_name)
+                if local_content == conteudo and local_name != full_name:
+                    same_content_names.append(local_name)
+            # Se existir, unifica: remove todos os outros, mantém só o novo
+            if same_content_names:
+                for n in same_content_names:
+                    self.template_manager.delete_template(n)
+                for name, _ in local_contents:
+                    if name != full_name:
+                        self.template_manager.delete_template(name)
+                self.template_manager.add_template(full_name, conteudo)
+                self.template_manager.meta._ensure_entry(full_name)
+                self.template_manager.meta.meta[full_name]["nocodb_id"] = str(nocodb_id)
+                self.template_manager.meta._save()
+                # Remove duplicados do meta.json
+                for name in list(self.template_manager.meta.meta.keys()):
+                    if name != full_name and self.template_manager.meta.meta[name].get("nocodb_id") == str(nocodb_id):
+                        self.template_manager.meta.remove_meta(name)
+                pasta_str = f"{pasta} / {nome}"
+                self.show_snackbar(f"Templates unificados como '{pasta_str}'!", toast_type="success", duration=2500)
+                self.template_manager.load_templates()
+                self._refresh_all_template_selectors()
+                return
+            # Caso contrário, remove todos, mantém só o nome do NocoDB (na pasta escolhida)
+            for name, _ in local_contents:
+                if name != full_name:
+                    self.template_manager.delete_template(name)
             self.template_manager.add_template(full_name, conteudo)
             self.template_manager.meta._ensure_entry(full_name)
             self.template_manager.meta.meta[full_name]["nocodb_id"] = str(nocodb_id)
@@ -1398,29 +1458,60 @@ class TemplateApp(ctk.CTk):
             for name in list(self.template_manager.meta.meta.keys()):
                 if name != full_name and self.template_manager.meta.meta[name].get("nocodb_id") == str(nocodb_id):
                     self.template_manager.meta.remove_meta(name)
+            pasta_str = f"{pasta} / {nome}"
             if any(self.template_manager._split_name(name)[0] != pasta for name in duplicate_names):
-                self.show_snackbar(f"Template movido para '{full_name}'!", toast_type="success", duration=2500)
+                self.show_snackbar(f"Template movido para '{pasta_str}'!", toast_type="success", duration=2500)
             else:
-                self.show_snackbar(f"Templates unificados como '{full_name}'!", toast_type="success", duration=2500)
+                self.show_snackbar(f"Templates unificados como '{pasta_str}'!", toast_type="success", duration=2500)
             self.template_manager.load_templates()
-            self.template_selector.configure(values=self.template_manager.get_display_names())
+            self._refresh_all_template_selectors()
             return
 
         elif duplicate_names and not all_equal:
             # Se há conteúdos diferentes, mostrar tela de comparação para o usuário escolher qual manter
             # Mostra janela de comparação múltipla
             import customtkinter as ctk
+            import datetime
+            import os
             compare_win = ctk.CTkToplevel(self)
             compare_win.title("Comparar Templates Duplicados")
-            compare_win.geometry("1000x600")
+            compare_win.update_idletasks()
+            # Calcula tamanho do monitor
+            screen_width = compare_win.winfo_screenwidth()
+            screen_height = compare_win.winfo_screenheight()
+            max_width = int(screen_width * 0.98)
+            max_height = int(screen_height * 0.92)
+            # Largura mínima por item
+            min_item_width = 400
+            n_items = 1 + len(local_contents)
+            # Calcula quantos cabem na tela
+            max_items_per_screen = max(1, (max_width - 40) // min_item_width)
+            # Se couber tudo, usa o tamanho ideal, senão, limita ao máximo da tela
+            if n_items <= max_items_per_screen:
+                win_width = min_item_width * n_items + 40
+                use_scroll = False
+            else:
+                win_width = max_width
+                use_scroll = True
+            win_height = min(600, max_height)
+            compare_win.geometry(f"{win_width}x{win_height}")
             compare_win.grab_set()
 
-            ctk.CTkLabel(compare_win, text="Template do NocoDB", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, padx=10, pady=10)
+            # Frame com scroll horizontal se necessário
+            if use_scroll:
+                scroll_frame = ctk.CTkScrollableFrame(compare_win, orientation="horizontal", width=win_width-10, height=win_height-80)
+                scroll_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=0, columnspan=2)
+                parent_frame = scroll_frame
+            else:
+                parent_frame = compare_win
+
+            # Cabeçalhos
+            ctk.CTkLabel(parent_frame, text="Template do NocoDB", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, padx=10, pady=10)
             for idx, (name, _) in enumerate(local_contents):
-                ctk.CTkLabel(compare_win, text=f"Template Local: {name}", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=idx+1, padx=10, pady=10)
+                ctk.CTkLabel(parent_frame, text=f"Template Local: {name}", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=idx+1, padx=10, pady=10)
 
             # NocoDB content
-            nocodb_box = ctk.CTkTextbox(compare_win, wrap="word", width=400, height=350)
+            nocodb_box = ctk.CTkTextbox(parent_frame, wrap="word", width=min_item_width, height=350)
             nocodb_box.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
             nocodb_box.insert("1.0", conteudo)
             nocodb_box.configure(state="disabled")
@@ -1428,57 +1519,188 @@ class TemplateApp(ctk.CTk):
             # Local contents
             local_boxes = []
             for idx, (name, content) in enumerate(local_contents):
-                local_box = ctk.CTkTextbox(compare_win, wrap="word", width=400, height=350)
+                local_box = ctk.CTkTextbox(parent_frame, wrap="word", width=min_item_width, height=350)
                 local_box.grid(row=1, column=idx+1, padx=10, pady=10, sticky="nsew")
-                local_box.insert("1.0", content)
+                local_box.insert("1.0", content if content is not None else "")
                 local_box.configure(state="disabled")
                 local_boxes.append((name, local_box))
 
-            ctk.CTkLabel(compare_win, text="Escolha qual template deseja manter:", font=ctk.CTkFont(size=13)).grid(row=2, column=0, columnspan=len(local_contents)+1, pady=(0, 10))
+            # Datas de criação e modificação
+            # NocoDB
+            nocodb_created = template.get('CreatedAt', '') or template.get('createdAt', '') or template.get('created_at', '')
+            nocodb_updated = template.get('UpdatedAt', '') or template.get('updatedAt', '') or template.get('updated_at', '')
+            def to_naive(dt):
+                if dt is not None and dt.tzinfo is not None:
+                    return dt.replace(tzinfo=None)
+                return dt
+
+            try:
+                nocodb_created_dt = datetime.datetime.fromisoformat(nocodb_created.replace("Z", "+00:00")) if nocodb_created else None
+                nocodb_created_dt = to_naive(nocodb_created_dt)
+            except Exception:
+                nocodb_created_dt = None
+            try:
+                nocodb_updated_dt = datetime.datetime.fromisoformat(nocodb_updated.replace("Z", "+00:00")) if nocodb_updated else None
+                nocodb_updated_dt = to_naive(nocodb_updated_dt)
+            except Exception:
+                nocodb_updated_dt = None
+
+            # Locais
+            local_created_list = []
+            local_modified_list = []
+            for idx, (name, _) in enumerate(local_contents):
+                local_path = self.template_manager._template_path(name)
+                try:
+                    local_created_dt = datetime.datetime.fromtimestamp(os.path.getctime(local_path)) if os.path.exists(local_path) else None
+                    local_created_dt = to_naive(local_created_dt)
+                except Exception:
+                    local_created_dt = None
+                try:
+                    local_modified_dt = datetime.datetime.fromtimestamp(os.path.getmtime(local_path)) if os.path.exists(local_path) else None
+                    local_modified_dt = to_naive(local_modified_dt)
+                except Exception:
+                    local_modified_dt = None
+                local_created_list.append(local_created_dt)
+                local_modified_list.append(local_modified_dt)
+
+            # Coleta todos para destacar o mais recente
+            all_created = [dt for dt in [nocodb_created_dt] + local_created_list if dt]
+            all_modified = [dt for dt in [nocodb_updated_dt] + local_modified_list if dt]
+            max_created = max(all_created) if all_created else None
+            max_modified = max(all_modified) if all_modified else None
+
+            # Linha de datas: criação (esquerda), modificação (direita), cor verde se for o mais recente, vermelho caso contrário
+            # NocoDB
+            nocodb_created_fmt = nocodb_created_dt.strftime('%d/%m/%Y %H:%M') if nocodb_created_dt else '-'
+            nocodb_updated_fmt = nocodb_updated_dt.strftime('%d/%m/%Y %H:%M') if nocodb_updated_dt else '-'
+            created_color = "#2ecc40" if nocodb_created_dt and nocodb_created_dt == max_created else "#e74c3c"
+            updated_color = "#2ecc40" if nocodb_updated_dt and nocodb_updated_dt == max_modified else "#e74c3c"
+            ctk.CTkLabel(
+                parent_frame,
+                text=f"Criação: {nocodb_created_fmt}",
+                font=ctk.CTkFont(size=11, slant="italic"),
+                text_color=created_color,
+                anchor="w",
+                justify="left"
+            ).grid(row=2, column=0, padx=(10, 2), sticky="w")
+            ctk.CTkLabel(
+                parent_frame,
+                text=f"Atualizado em: {nocodb_updated_fmt}",
+                font=ctk.CTkFont(size=11, slant="italic"),
+                text_color=updated_color,
+                anchor="e",
+                justify="right"
+            ).grid(row=2, column=0, padx=(2, 10), sticky="e")
+
+            # Locais
+            for idx, (name, _) in enumerate(local_contents):
+                local_created_dt = local_created_list[idx]
+                local_modified_dt = local_modified_list[idx]
+                local_created_fmt = local_created_dt.strftime('%d/%m/%Y %H:%M') if local_created_dt else '-'
+                local_modified_fmt = local_modified_dt.strftime('%d/%m/%Y %H:%M') if local_modified_dt else '-'
+                created_color = "#2ecc40" if local_created_dt and local_created_dt == max_created else "#e74c3c"
+                updated_color = "#2ecc40" if local_modified_dt and local_modified_dt == max_modified else "#e74c3c"
+                ctk.CTkLabel(
+                    parent_frame,
+                    text=f"Criação: {local_created_fmt}",
+                    font=ctk.CTkFont(size=11, slant="italic"),
+                    text_color=created_color,
+                    anchor="w",
+                    justify="left"
+                ).grid(row=2, column=idx+1, padx=(10, 2), sticky="w")
+                ctk.CTkLabel(
+                    parent_frame,
+                    text=f"Atualizado em: {local_modified_fmt}",
+                    font=ctk.CTkFont(size=11, slant="italic"),
+                    text_color=updated_color,
+                    anchor="e",
+                    justify="right"
+                ).grid(row=2, column=idx+1, padx=(2, 10), sticky="e")
+
+            ctk.CTkLabel(compare_win, text="Escolha qual template deseja manter:", font=ctk.CTkFont(size=13)).grid(row=4, column=0, columnspan=len(local_contents)+1, pady=(0, 10))
 
             btn_frame = ctk.CTkFrame(compare_win)
-            btn_frame.grid(row=3, column=0, columnspan=len(local_contents)+1, pady=10)
+            btn_frame.grid(row=5, column=0, columnspan=len(local_contents)+1, pady=10)
 
             def manter_nocodb():
+                # Garante que a pasta padrão seja só a pasta, não o nome completo do template
+                if local_contents:
+                    old_category, _ = self.template_manager._split_name(local_contents[0][0])
+                else:
+                    old_category = "Geral"
                 # Pergunta a pasta
-                pasta = prompt_pasta(categorias)
+                pasta = prompt_pasta(categorias, old_category)
                 if pasta is None:
                     self.show_snackbar("Importação cancelada.", toast_type="info")
                     compare_win.destroy()
                     return
                 full_name = f"{pasta} / {nome}" if pasta != "Geral" else nome
+
+                # Remove TODOS os arquivos locais com a mesma nocodb_id (inclusive o que será substituído)
+                for name, _ in local_contents:
+                    self.template_manager.delete_template(name)
+                # Remove duplicados do meta.json (com a mesma nocodb_id) ANTES de criar o novo
+                for name in list(self.template_manager.meta.meta.keys()):
+                    if self.template_manager.meta.meta[name].get("nocodb_id") == str(nocodb_id):
+                        self.template_manager.meta.remove_meta(name)
+                # Cria o template escolhido (importado do NocoDB)
                 self.template_manager.add_template(full_name, conteudo)
                 self.template_manager.meta._ensure_entry(full_name)
                 self.template_manager.meta.meta[full_name]["nocodb_id"] = str(nocodb_id)
                 self.template_manager.meta._save()
-                # Remove todos os outros duplicados
-                for name, _ in local_contents:
-                    if name != full_name:
-                        self.template_manager.delete_template(name)
-                if old_category != pasta:
-                    self.show_snackbar(f"Template movido para '{full_name}'!", toast_type="success", duration=2500)
-                else:
-                    self.show_snackbar(f"Template do NocoDB mantido como '{full_name}'!", toast_type="success", duration=2500)
+                pasta_str = f"{pasta} / {nome}"
                 self.template_manager.load_templates()
-                self.template_selector.configure(values=self.template_manager.get_display_names())
+                self._refresh_all_template_selectors()
+                # Seleciona o template recém importado na interface principal, se possível
+                if hasattr(self, "template_selector"):
+                    self.current_template = full_name
+                    self.current_template_display.set(self.template_manager.meta.get_display_name(full_name))
+                    self.template_selector.set(self.template_manager.meta.get_display_name(full_name))
+                    self.load_template_placeholders()
+                if old_category != pasta:
+                    self.show_snackbar(f"Template movido para '{pasta_str}' e atualizado!", toast_type="success", duration=2500)
+                else:
+                    self.show_snackbar(f"Template atualizado!", toast_type="success", duration=2500)
                 compare_win.destroy()
 
-            def manter_local(idx):
+            def manter_local(idx, old_category=local_contents[0][0].split(" / ", 0)[0] if local_contents else "Geral", old_nome=local_contents[0][0].split(" / ", 1)[1] if local_contents and " / " in local_contents[0][0] else (local_contents[0][0] if local_contents else "")):
                 name, _ = local_contents[idx]
-                # Remove todos os outros duplicados e mantém só esse
-                for n, _ in local_contents:
-                    if n != name:
-                        self.template_manager.delete_template(n)
-                # Atualiza meta para garantir unicidade
-                self.template_manager.meta._ensure_entry(name)
-                self.template_manager.meta.meta[name]["nocodb_id"] = str(nocodb_id)
-                self.template_manager.meta._save()
-                if old_category != self.template_manager._split_name(name)[0]:
-                    self.show_snackbar(f"Template movido para '{name}'!", toast_type="success", duration=2500)
+                current_category, current_nome = self.template_manager._split_name(name)
+                # Pergunta a pasta para manter o local
+                pasta = prompt_pasta(categorias, current_category)
+                if pasta is None:
+                    self.show_snackbar("Importação cancelada.", toast_type="info")
+                    compare_win.destroy()
+                    return
+                new_name = f"{pasta} / {current_nome}" if pasta != "Geral" else current_nome
+                if new_name != name:
+                    # Move o template para a nova pasta
+                    self.template_manager.save_template(name, new_name, self.template_manager.get_template(name))
+                    # Atualiza meta para garantir unicidade
+                    self.template_manager.meta._ensure_entry(new_name)
+                    self.template_manager.meta.meta[new_name]["nocodb_id"] = str(nocodb_id)
+                    self.template_manager.meta._save()
+                    self.template_manager.delete_template(name)
+                    pasta_str = f"{pasta} / {current_nome}"
+                    self.show_snackbar(f"Template movido para '{pasta_str}'!", toast_type="success", duration=2500)
+                    keep_name = new_name
                 else:
-                    self.show_snackbar(f"Template local '{name}' mantido!", toast_type="success", duration=2500)
+                    # Apenas atualiza o nocodb_id e mantém o template
+                    self.template_manager.meta._ensure_entry(name)
+                    self.template_manager.meta.meta[name]["nocodb_id"] = str(nocodb_id)
+                    self.template_manager.meta._save()
+                    pasta_str = f"{current_category} / {current_nome}"
+                    self.show_snackbar(f"Template local '{pasta_str}' mantido!", toast_type="success", duration=2500)
+                    keep_name = name
+                # Remove todos os outros duplicados de arquivo e do meta.json, mantendo só o escolhido
+                for n, _ in local_contents:
+                    if n != keep_name:
+                        self.template_manager.delete_template(n)
+                for n in list(self.template_manager.meta.meta.keys()):
+                    if n != keep_name and self.template_manager.meta.meta[n].get("nocodb_id") == str(nocodb_id):
+                        self.template_manager.meta.remove_meta(n)
                 self.template_manager.load_templates()
-                self.template_selector.configure(values=self.template_manager.get_display_names())
+                self._refresh_all_template_selectors()
                 compare_win.destroy()
 
             ctk.CTkButton(btn_frame, text="Manter do NocoDB", fg_color="#388E3C", command=manter_nocodb).pack(side="left", padx=10)
@@ -1621,7 +1843,7 @@ class TemplateApp(ctk.CTk):
                 else:
                     self.show_snackbar(f"Template '{full_name}' importado!", toast_type="success", duration=2500)
                 self.template_manager.load_templates()
-                self.template_selector.configure(values=self.template_manager.get_display_names())
+                self._refresh_all_template_selectors()
                 return
             if local_content != conteudo:
                 # Mostra janela de comparação lado a lado (NocoDB à esquerda, Local à direita)
@@ -1629,6 +1851,9 @@ class TemplateApp(ctk.CTk):
                 compare_win.title("Comparar Templates")
                 compare_win.geometry("900x500")
                 compare_win.grab_set()
+
+                import datetime
+                import os
 
                 ctk.CTkLabel(compare_win, text="Template do NocoDB", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, padx=10, pady=10)
                 ctk.CTkLabel(compare_win, text="Template Local", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=1, padx=10, pady=10)
@@ -1643,19 +1868,31 @@ class TemplateApp(ctk.CTk):
                 local_box.insert("1.0", local_content)
                 local_box.configure(state="disabled")
 
-                # Datas de atualização
-                import datetime
+                # Datas de criação e modificação
+                nocodb_created = template.get('CreatedAt', '') or template.get('createdAt', '') or template.get('created_at', '')
+                nocodb_updated = template.get('UpdatedAt', '') or template.get('updatedAt', '') or template.get('updated_at', '')
                 try:
-                    nocodb_dt = datetime.datetime.fromisoformat(nocodb_updated.replace("Z", "+00:00")) if nocodb_updated else None
-                    if nocodb_dt and nocodb_dt.tzinfo is not None:
-                        nocodb_dt = nocodb_dt.replace(tzinfo=None)
+                    nocodb_created_fmt = datetime.datetime.fromisoformat(nocodb_created.replace("Z", "+00:00")).strftime('%d/%m/%Y %H:%M') if nocodb_created else '-'
                 except Exception:
-                    nocodb_dt = None
+                    nocodb_created_fmt = '-'
                 try:
-                    local_mtime = os.path.getmtime(local_path)
-                    local_dt = datetime.datetime.fromtimestamp(local_mtime)
+                    nocodb_updated_fmt = datetime.datetime.fromisoformat(nocodb_updated.replace("Z", "+00:00")).strftime('%d/%m/%Y %H:%M') if nocodb_updated else '-'
                 except Exception:
-                    local_dt = None
+                    nocodb_updated_fmt = '-'
+                try:
+                    local_created = datetime.datetime.fromtimestamp(os.path.getctime(local_path)).strftime('%d/%m/%Y %H:%M') if os.path.exists(local_path) else '-'
+                except Exception:
+                    local_created = '-'
+                try:
+                    local_modified = datetime.datetime.fromtimestamp(os.path.getmtime(local_path)).strftime('%d/%m/%Y %H:%M') if os.path.exists(local_path) else '-'
+                except Exception:
+                    local_modified = '-'
+
+                ctk.CTkLabel(compare_win, text=f"Criação: {nocodb_created_fmt}", font=ctk.CTkFont(size=11, slant="italic")).grid(row=2, column=0, padx=10, sticky="w")
+                ctk.CTkLabel(compare_win, text=f"Modificação: {nocodb_updated_fmt}", font=ctk.CTkFont(size=11, slant="italic")).grid(row=3, column=0, padx=10, sticky="w")
+                ctk.CTkLabel(compare_win, text=f"Criação: {local_created}", font=ctk.CTkFont(size=11, slant="italic")).grid(row=2, column=1, padx=10, sticky="w")
+                ctk.CTkLabel(compare_win, text=f"Modificação: {local_modified}", font=ctk.CTkFont(size=11, slant="italic")).grid(row=3, column=1, padx=10, sticky="w")
+                row_info += 1
 
                 info_text = ""
                 if nocodb_dt and local_dt:
@@ -1674,7 +1911,7 @@ class TemplateApp(ctk.CTk):
                 else:
                     info_text = "Datas de atualização indisponíveis."
 
-                ctk.CTkLabel(compare_win, text=info_text, font=ctk.CTkFont(size=12, slant="italic")).grid(row=2, column=0, columnspan=2, pady=(0, 10))
+                ctk.CTkLabel(compare_win, text=info_text, font=ctk.CTkFont(size=12, slant="italic")).grid(row=row_info, column=0, columnspan=2, pady=(0, 10))
 
                 btn_frame = ctk.CTkFrame(compare_win)
                 btn_frame.grid(row=3, column=0, columnspan=2, pady=10)

@@ -1,4 +1,4 @@
-from main_window import TemplateApp
+from main_window import TemplateApp 
 from main_window import placeholder_engine
 
 
