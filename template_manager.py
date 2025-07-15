@@ -14,17 +14,19 @@ class TemplateManager:
         os.makedirs(self.template_dir, exist_ok=True)
 
     def _template_path(self, full_name):
-        category, name = self._split_name(full_name)
-        if category == "Geral":
-            return os.path.join(self.template_dir, f"{name}.txt")
-        folder = os.path.join(self.template_dir, category)
-        os.makedirs(folder, exist_ok=True)
-        return os.path.join(folder, f"{name}.txt")
-
-    def _split_name(self, full_name):
+        # Não há mais tratamento especial para pasta raiz
         parts = full_name.split(" / ", 1)
         if len(parts) == 1:
-            return ("Geral", parts[0])
+            return os.path.join(self.template_dir, f"{parts[0]}.txt")
+        folder = os.path.join(self.template_dir, parts[0])
+        os.makedirs(folder, exist_ok=True)
+        return os.path.join(folder, f"{parts[1]}.txt")
+
+    def _split_name(self, full_name):
+        # Não há mais tratamento especial para pasta raiz
+        parts = full_name.split(" / ", 1)
+        if len(parts) == 1:
+            return (None, parts[0])
         return (parts[0], parts[1])
 
     def get_template_names(self):
@@ -80,9 +82,9 @@ class TemplateManager:
             for file in files:
                 if file.endswith(".txt"):
                     rel_path = os.path.relpath(root, self.template_dir)
-                    category = rel_path.replace("\\", "/") if rel_path != "." else "Geral"
+                    category = rel_path.replace("\\", "/") if rel_path != "." else None
                     name = file[:-4]
-                    full_name = f"{category} / {name}" if category != "Geral" else f"{name}"
+                    full_name = f"{category} / {name}" if category else name
                     self.templates[full_name] = self._read_template(os.path.join(root, file))
 
         if not self.templates:

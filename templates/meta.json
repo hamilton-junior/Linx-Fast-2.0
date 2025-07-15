@@ -9,17 +9,17 @@
     "protegido": false,
     "nocodb_id": "3"
   },
-  "Suporte / Falta de Interação": {
-    "favorito": true,
-    "protegido": false,
-    "nocodb_id": "4"
-  },
   "Suporte / Abertura de Chamado": {
     "nocodb_id": "1",
     "favorito": true,
     "protegido": false
   },
-  "Suporte / Template Exemplo buscado da API": {
+  "Template Exemplo buscado da API": {
     "nocodb_id": "68"
+  },
+  "Suporte / Falta de Interação": {
+    "nocodb_id": "4",
+    "favorito": true,
+    "protegido": false
   }
 }

@@ -80,7 +80,7 @@ class TemplateMeta:
             self.meta[canonical_name] = {}
 
     def _canonical_name(self, name):
-        # Mantém a pasta como está, mas o nome do template com a primeira letra maiúscula
+        # Não há mais tratamento especial para pasta raiz
         if " / " in name:
             pasta, nome = name.split(" / ", 1)
             nome_corrigido = nome[:1].upper() + nome[1:] if nome else nome

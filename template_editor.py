@@ -3,7 +3,7 @@ from tkinter import messagebox
 from customtkinter import CTkInputDialog
 
 class TemplateEditor(ctk.CTkToplevel):
-    def __init__(self, master, manager, get_placeholders_callback, current_template="Geral / Template Padrão"):
+    def __init__(self, master, manager, get_placeholders_callback, current_template="Template Padrão"):
         super().__init__(master)
         self.title("Editor de Templates")
         self._after_ids = set()
@@ -94,7 +94,7 @@ class TemplateEditor(ctk.CTkToplevel):
             return
 
         old_category, _ = self.manager._split_name(self.original_name)
-        full_new = f"{old_category} / {new_name}"
+        full_new = f"{old_category} / {new_name}" if old_category else new_name
 
         content = self.content_box.get("1.0", "end").strip()
         self.manager.save_template(self.original_name, full_new, content)
@@ -129,7 +129,7 @@ class TemplateEditor(ctk.CTkToplevel):
                 return
 
             category = self.manager._split_name(self.original_name)[0]
-            full_name = f"{category} / {new_name}"
+            full_name = f"{category} / {new_name}" if category else new_name
 
             if full_name in self.manager.get_template_names():
                 messagebox.showerror("Erro", "Esse template já existe.")

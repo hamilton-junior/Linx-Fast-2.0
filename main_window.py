@@ -258,10 +258,11 @@ class TemplateApp(ctk.CTk):
         import webbrowser
         import os
 
-        links = [
-            ("Envio de Templates", "https://app.nocodb.com/#/nc/form/99e96b28-cb03-4710-9318-7b1d5849d9e0"),
-            ("Sugestões", "https://app.nocodb.com/#/nc/form/0058474a-0f28-4d3d-af60-1727a29ab431"),
-            ("Report-a-bug", "https://app.nocodb.com/#/nc/form/5dd88074-bbf3-457f-b105-816652c79ddf"),
+        # Lista de botões: (nome, url, nome_da_imagem_alternativa)
+        botoes_info = [
+            ("Envio de Templates", "https://app.nocodb.com/#/nc/form/99e96b28-cb03-4710-9318-7b1d5849d9e0", "template.png"),
+            ("Sugestões", "https://app.nocodb.com/#/nc/form/0058474a-0f28-4d3d-af60-1727a29ab431", "sugestao.png"),
+            ("Report-a-bug", "https://app.nocodb.com/#/nc/form/5dd88074-bbf3-457f-b105-816652c79ddf", "bug.png"),
         ]
 
         win = ctk.CTkToplevel(self)
@@ -278,23 +279,48 @@ class TemplateApp(ctk.CTk):
             from PIL import Image
             base_dir = os.path.dirname(os.path.abspath(__file__))
             img_path = os.path.join(base_dir, "assets", "images", "logo.png")
-            if os.path.exists(img_path):
-                pil_image = Image.open(img_path)
-                image = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=(64, 64))
-                ctk.CTkLabel(win, image=image, text="").pack(pady=(12, 2))
+            pil_image = Image.open(img_path)
+            image = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=(64, 64))
+            img_label = ctk.CTkLabel(win, image=image, text="", cursor="hand2")
+            img_label.pack(pady=(12, 2))
+            def open_logo_link(event=None):
+                webbrowser.open_new("https://app.nocodb.com/#/base/d45b6596-528f-4eec-9ff5-4793831c07be")
+            img_label.bind("<Button-1>", open_logo_link)
         except Exception as e:
             print(f"Erro ao carregar imagem: {e}")
+            img_label = None
+            image = None
 
-        for name, url in links:
-            def open_link(u=url):
-                webbrowser.open_new(u)
+        # Crie os botões e associe cada um à sua imagem alternativa
+        alt_images = {}
+        btns = {}
+        for name, url, img_file in botoes_info:
             btn = ctk.CTkButton(
                 win,
                 text=name,
                 width=150,
-                command=open_link
+                command=lambda u=url: webbrowser.open_new(u)
             )
             btn.pack(pady=6)
+            btns[name] = btn
+            # Carrega a imagem alternativa
+            alt_img_path = os.path.join(base_dir, "assets", "images", img_file)
+            if os.path.exists(alt_img_path):
+                from PIL import Image
+                pil_alt = Image.open(alt_img_path)
+                alt_images[name] = ctk.CTkImage(light_image=pil_alt, dark_image=pil_alt, size=(64, 64))
+            else:
+                alt_images[name] = image  # fallback
+
+            # Bind individual para cada botão, usando o nome como chave
+            def make_set_img_alt(btn_name):
+                def _set_img_alt(event):
+                    if img_label and alt_images.get(btn_name):
+                        img_label.configure(image=alt_images[btn_name])
+                return _set_img_alt
+
+            btn.bind("<Enter>", make_set_img_alt(name))
+            btn.bind("<Leave>", lambda e: img_label.configure(image=image) if img_label and image else None)
 
         ctk.CTkLabel(
             win,
@@ -1170,14 +1196,31 @@ class TemplateApp(ctk.CTk):
             self.show_snackbar("Erro ao buscar templates. Veja o log para detalhes.", toast_type="error")
             return []
 
-    def _refresh_all_template_selectors(self):
+    def _refresh_all_template_selectors(self, select_template=None):
         # Atualiza todos os OptionMenus relevantes (main, editor, quick popup)
         # Main selector
         if hasattr(self, "template_selector"):
             self.template_selector.configure(values=self.template_manager.get_display_names())
+            # Seleciona o template alterado, se fornecido
+            if select_template:
+                display_name = self.template_manager.meta.get_display_name(select_template)
+                self.current_template = select_template
+                self.current_template_display.set(display_name)
+                self.template_selector.set(display_name)
+                self.load_template_placeholders()
         # Template Editor
         for w in self.winfo_children():
-            if hasattr(w, "dropdown"):
+            if w.__class__.__name__ == "TemplateEditor":
+                try:
+                    w.refresh_templates()
+                    # Seleciona o template alterado, se fornecido
+                    if select_template:
+                        display_name = self.template_manager.meta.get_display_name(select_template)
+                        w.template_var.set(display_name)
+                        w.load_template(select_template)
+                except Exception:
+                    pass
+            elif hasattr(w, "dropdown"):
                 try:
                     w.dropdown.configure(values=self.template_manager.get_display_names())
                 except Exception:
@@ -1292,10 +1335,15 @@ class TemplateApp(ctk.CTk):
         categorias = sorted(set(categorias))
 
         # Procura todos os templates locais com esse nocodb_id
-        duplicate_names = [
-            local_name for local_name, meta in self.template_manager.meta.meta.items()
-            if meta.get("nocodb_id") == str(nocodb_id)
-        ]
+        duplicate_names = []
+        for local_name, meta in self.template_manager.meta.meta.items():
+            # Padroniza: se for "Geral / Nome", converte para "Nome"
+            if local_name.startswith("Geral / "):
+                local_name_check = local_name.split(" / ", 1)[1]
+            else:
+                local_name_check = local_name
+            if meta.get("nocodb_id") == str(nocodb_id):
+                duplicate_names.append(local_name_check)
         existing_name = duplicate_names[0] if duplicate_names else None
 
         # --- NOVO: Procura todos os templates locais com o MESMO CONTEÚDO ---
@@ -1390,6 +1438,7 @@ class TemplateApp(ctk.CTk):
         # Se houver duplicados, verifica se o conteúdo é igual
         local_contents = []
         for name in duplicate_names:
+            # Para "Geral", o nome do arquivo é só o nome, nunca "Geral / Nome"
             local_path = self.template_manager._template_path(name)
             if os.path.exists(local_path):
                 # Sempre lê o conteúdo diretamente do arquivo para garantir que está atualizado
@@ -1636,21 +1685,35 @@ class TemplateApp(ctk.CTk):
                     return
                 full_name = f"{pasta} / {nome}" if pasta != "Geral" else nome
 
-                # Remove TODOS os arquivos locais com a mesma nocodb_id (inclusive o que será substituído)
-                for name, _ in local_contents:
-                    self.template_manager.delete_template(name)
-                # Remove duplicados do meta.json (com a mesma nocodb_id) ANTES de criar o novo
-                for name in list(self.template_manager.meta.meta.keys()):
-                    if self.template_manager.meta.meta[name].get("nocodb_id") == str(nocodb_id):
-                        self.template_manager.meta.remove_meta(name)
-                # Cria o template escolhido (importado do NocoDB)
+                # Salva todos os templates comparados em um dicionário
+                templates_compared = {name: content for name, content in local_contents}
+
+                # Remove o template escolhido do dicionário (vai ser recriado/atualizado)
+                if full_name in templates_compared:
+                    del templates_compared[full_name]
+
+                # Marca todos os outros templates para remoção (nocodb_id = "-1")
+                for name in templates_compared:
+                    self.template_manager.meta._ensure_entry(name)
+                    self.template_manager.meta.meta[name]["nocodb_id"] = "-1"
+                    self.template_manager.meta._save()
+
+                # Cria ou sobrescreve o template escolhido com o nome e conteúdo do NocoDB
                 self.template_manager.add_template(full_name, conteudo)
                 self.template_manager.meta._ensure_entry(full_name)
                 self.template_manager.meta.meta[full_name]["nocodb_id"] = str(nocodb_id)
                 self.template_manager.meta._save()
+
+                # Remove duplicados do meta.json (com a mesma nocodb_id) exceto o escolhido
+                for name in list(self.template_manager.meta.meta.keys()):
+                    if name != full_name and self.template_manager.meta.meta[name].get("nocodb_id") == str(nocodb_id):
+                        self.template_manager.meta.remove_meta(name)
+
                 pasta_str = f"{pasta} / {nome}"
                 self.template_manager.load_templates()
-                self._refresh_all_template_selectors()
+                self._refresh_all_template_selectors(select_template=full_name)
+                # Remove todos os templates marcados para exclusão
+                self.remover_templates_nocodb_id_menos_um()
                 # Seleciona o template recém importado na interface principal, se possível
                 if hasattr(self, "template_selector"):
                     self.current_template = full_name
@@ -1663,7 +1726,9 @@ class TemplateApp(ctk.CTk):
                     self.show_snackbar(f"Template atualizado!", toast_type="success", duration=2500)
                 compare_win.destroy()
 
-            def manter_local(idx, old_category=local_contents[0][0].split(" / ", 0)[0] if local_contents else "Geral", old_nome=local_contents[0][0].split(" / ", 1)[1] if local_contents and " / " in local_contents[0][0] else (local_contents[0][0] if local_contents else "")):
+            def manter_local(idx):
+                # Salva todos os templates comparados em um dicionário
+                templates_compared = {name: content for name, content in local_contents}
                 name, _ = local_contents[idx]
                 current_category, current_nome = self.template_manager._split_name(name)
                 # Pergunta a pasta para manter o local
@@ -1672,35 +1737,40 @@ class TemplateApp(ctk.CTk):
                     self.show_snackbar("Importação cancelada.", toast_type="info")
                     compare_win.destroy()
                     return
-                new_name = f"{pasta} / {current_nome}" if pasta != "Geral" else current_nome
-                if new_name != name:
-                    # Move o template para a nova pasta
-                    self.template_manager.save_template(name, new_name, self.template_manager.get_template(name))
-                    # Atualiza meta para garantir unicidade
-                    self.template_manager.meta._ensure_entry(new_name)
-                    self.template_manager.meta.meta[new_name]["nocodb_id"] = str(nocodb_id)
-                    self.template_manager.meta._save()
+                keep_name = f"{pasta} / {current_nome}" if pasta != "Geral" else current_nome
+
+                # Se o nome mudou, move o template para a nova pasta
+                if keep_name != name:
+                    self.template_manager.save_template(name, keep_name, self.template_manager.get_template(name))
                     self.template_manager.delete_template(name)
-                    pasta_str = f"{pasta} / {current_nome}"
-                    self.show_snackbar(f"Template movido para '{pasta_str}'!", toast_type="success", duration=2500)
-                    keep_name = new_name
-                else:
-                    # Apenas atualiza o nocodb_id e mantém o template
-                    self.template_manager.meta._ensure_entry(name)
-                    self.template_manager.meta.meta[name]["nocodb_id"] = str(nocodb_id)
+
+                # Atualiza meta para garantir unicidade e nocodb_id
+                self.template_manager.meta._ensure_entry(keep_name)
+                self.template_manager.meta.meta[keep_name]["nocodb_id"] = str(nocodb_id)
+                self.template_manager.meta._save()
+
+                # Remove o template escolhido do dicionário (vai ser mantido)
+                if keep_name in templates_compared:
+                    del templates_compared[keep_name]
+                if name in templates_compared:
+                    del templates_compared[name]
+
+                # Marca todos os outros templates para remoção (nocodb_id = "-1")
+                for n in templates_compared:
+                    self.template_manager.meta._ensure_entry(n)
+                    self.template_manager.meta.meta[n]["nocodb_id"] = "-1"
                     self.template_manager.meta._save()
-                    pasta_str = f"{current_category} / {current_nome}"
-                    self.show_snackbar(f"Template local '{pasta_str}' mantido!", toast_type="success", duration=2500)
-                    keep_name = name
-                # Remove todos os outros duplicados de arquivo e do meta.json, mantendo só o escolhido
-                for n, _ in local_contents:
-                    if n != keep_name:
-                        self.template_manager.delete_template(n)
+
+                # Remove duplicados do meta.json (com a mesma nocodb_id) exceto o escolhido
                 for n in list(self.template_manager.meta.meta.keys()):
                     if n != keep_name and self.template_manager.meta.meta[n].get("nocodb_id") == str(nocodb_id):
                         self.template_manager.meta.remove_meta(n)
+
+                pasta_str = f"{pasta} / {current_nome}"
                 self.template_manager.load_templates()
-                self._refresh_all_template_selectors()
+                self._refresh_all_template_selectors(select_template=keep_name)
+                self.remover_templates_nocodb_id_menos_um()
+                self.show_snackbar(f"Template local '{pasta_str}' mantido!", toast_type="success", duration=2500)
                 compare_win.destroy()
 
             ctk.CTkButton(btn_frame, text="Manter do NocoDB", fg_color="#388E3C", command=manter_nocodb).pack(side="left", padx=10)
@@ -2149,6 +2219,16 @@ class TemplateApp(ctk.CTk):
         self.show_snackbar(f"Template '{full_name}' importado!", toast_type="success", duration=2500)
         self.template_manager.load_templates()
         self.template_selector.configure(values=self.template_manager.get_display_names())
+
+    def remover_templates_nocodb_id_menos_um(self):
+        # Remove todos os templates e metas com nocodb_id == "-1"
+        to_remove = [name for name, meta in self.template_manager.meta.meta.items()
+                    if meta.get("nocodb_id") == "-1"]
+        for name in to_remove:
+            self.template_manager.delete_template(name)
+        self.template_manager.load_templates()
+        self._refresh_all_template_selectors()
+
 
     def show_nocodb_templates(self):
         import customtkinter as ctk
