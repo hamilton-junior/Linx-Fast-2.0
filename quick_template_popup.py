@@ -130,7 +130,6 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         else:
             TemplateApp.show_snackbar("PIN desativado!", toast_type="info")
 
-
     def load_template(self, template_name):
         from main_window import placeholder_engine  # Importa aqui para evitar import circular
         import json
@@ -193,7 +192,6 @@ class QuickTemplatePopup(ctk.CTkToplevel):
 
         # Campos fixos sempre primeiro, na ordem padrão, depois os dinâmicos na ordem salva
         used_fields = fixed_present + dynamic_ordered
-
 
         import re
         def detect_field_type(name):
@@ -279,11 +277,30 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             else:
                 entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field_label}")
                 if hasattr(self, "clear_on_switch") and not self.clear_on_switch.get():
-                    valor_antigo = old_values.get(field, None)
+                    valor_antigo = old_values.get(field)
                     if valor_antigo not in (None, ""):
                         entry.insert(0, valor_antigo)
                 entry.grid(row=i, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
                 self.entries[field] = entry
+
+            # Se o campo for 'Nome', adiciona trace para atualizar o título
+            if field == "Nome":
+
+                def update_title_nome(*args):
+                    nome_val = self.entries["Nome"].get()
+                    if nome_val:
+                        self.title(f"{nome_val} - Modo Simples - Linx Fast")
+                    else:
+                        self.title("Modo Simples - Linx Fast")
+
+                # Adiciona trace para atualizar o título ao mudar o valor
+                try:
+                    self.entries["Nome"].bind(
+                        "<KeyRelease>", lambda e: update_title_nome()
+                    )
+                    update_title_nome()
+                except Exception:
+                    pass
 
         # Ajusta o tamanho da janela com base nos campos
         self.update_idletasks()
@@ -325,7 +342,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             min_height = 220
             final_height = max(min(desired_height, max_height), min_height)
             self.geometry(f"400x{final_height}")                
-            
+
     def copy_template(self):
         from main_window import placeholder_engine  # Importa aqui para evitar import circular
 
