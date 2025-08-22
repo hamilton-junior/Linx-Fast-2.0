@@ -1,9 +1,14 @@
 import os
 import re
+import logging
 from template_meta import TemplateMeta
+
+# Get the module logger
+logger = logging.getLogger(__name__)
 
 class TemplateManager:
     def __init__(self, template_dir="templates"):
+        logger.info(f"Iniciando Template Manager com diretório: {template_dir}")
         self.template_dir = os.path.abspath(template_dir)
         self.templates = {}  # {"Categoria / Nome": conteúdo}
         self.meta = TemplateMeta(self.template_dir)
@@ -39,6 +44,7 @@ class TemplateManager:
         return self.templates.get(full_name, "")
 
     def save_template(self, old_name, new_name, content):
+        logger.info(f"Salvando template. Old: {old_name}, New: {new_name}")
         if old_name != new_name and old_name in self.templates:
             old_path = self._template_path(old_name)
             if os.path.exists(old_path):
@@ -68,6 +74,7 @@ class TemplateManager:
                 f.write(content)
 
     def delete_template(self, full_name):
+        logger.info(f"Excluindo template: {full_name}")
         if full_name in self.templates:
             path = self._template_path(full_name)
             if os.path.exists(path):
@@ -97,7 +104,6 @@ class TemplateManager:
     def extract_placeholders(self, content):
         # Suporta campos inteligentes: $[checkbox]Campo$, $[switch]Campo$, $[radio:op1|op2]Campo$
         # E também extrai corretamente campos usados em condicionais
-        import re
         # Extrai todos os $...$ do template
         all_matches = re.findall(
             r"\$([^\$]+)\$", content

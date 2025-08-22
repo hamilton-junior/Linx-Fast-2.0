@@ -1,9 +1,14 @@
 import customtkinter as ctk
 from tkinter import messagebox
 from customtkinter import CTkInputDialog
+import logging
+
+# Get the module logger
+logger = logging.getLogger(__name__)
 
 class TemplateEditor(ctk.CTkToplevel):
     def __init__(self, master, manager, get_placeholders_callback, current_template="Template Padrão"):
+        logger.info(f"Iniciando Editor de Templates para: {current_template}")
         super().__init__(master)
         self.title("Editor de Templates")
         self._after_ids = set()
@@ -212,7 +217,6 @@ class TemplateEditor(ctk.CTkToplevel):
             self.load_template(next_template)
             self.refresh_templates()
 
-
     def refresh_templates(self):
         self.template_names = self.manager.get_template_names()
         display_names = self.manager.get_display_names()
@@ -256,7 +260,6 @@ class TemplateEditor(ctk.CTkToplevel):
             btn = ctk.CTkButton(frame, text=f"${ph}$", width=180, height=26,
                                 font=ctk.CTkFont(size=11), command=insert)
             btn.pack(pady=1, anchor="w")
-
 
     def _safe_after(self, delay, callback):
         after_id = self.after(delay, callback)

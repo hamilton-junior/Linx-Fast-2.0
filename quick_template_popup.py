@@ -2,12 +2,16 @@ import customtkinter as ctk
 from tkinter import StringVar
 from tkinter import messagebox
 from app import TemplateApp
-from template_editor import TemplateEditor
-from template_manager import TemplateManager
 from theme_manager import ThemeManager
+
+import logging
+
+# Get the module logger
+logger = logging.getLogger(__name__)
 
 class QuickTemplatePopup(ctk.CTkToplevel):
     def __init__(self, master, manager):
+        logger.info("Iniciando Quick Template Popup")
         super().__init__(master)
         self.title("Modo Simples – Linx Fast")
         self._after_ids = set()
@@ -17,6 +21,16 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self.theme_manager = ThemeManager(theme_name=getattr(master, "theme_name", "green"))
         self.geometry("325x250")
         self.entries = {}
+        # Referência ao app principal para funções de UI
+        self.app = master
+
+        # Configura logging
+        if not isinstance(master, TemplateApp):
+            logging.warning(
+                "QuickTemplatePopup master não é um TemplateApp, algumas funções de UI podem não funcionar."
+            )
+
+        logging.info("Iniciando QuickTemplatePopup...")
 
         # Corrige o modo de aparência do popup para ser igual ao app principal
         # Não altera o modo de aparência aqui! Apenas no _build_interface, e só se necessário.
@@ -110,14 +124,29 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self.form_frame.grid(row=2, column=0, columnspan=3, padx=20, pady=(5, 0), sticky="nsew")
         self.form_frame.grid_columnconfigure(0, weight=1)
 
-        # Botão de ação
-        self.copy_btn = ctk.CTkButton(
-            self,
-            text="Copiar",
-            fg_color="#7E57C2",
-            command=self.copy_template
+        # Frame para botões de ação
+        button_frame = ctk.CTkFrame(self, fg_color="transparent")
+        button_frame.grid(
+            row=3, column=0, columnspan=3, pady=(15, 15), padx=20, sticky="ew"
         )
-        self.copy_btn.grid(row=3, column=0, columnspan=3, pady=(15, 15), padx=20, sticky="ew")
+        button_frame.grid_columnconfigure(0, weight=1)  # Clear button
+        button_frame.grid_columnconfigure(1, weight=1)  # Copy button
+
+        # Botão limpar campos
+        self.clear_btn = ctk.CTkButton(
+            button_frame,
+            text="Limpar Campos",
+            fg_color="#FF5252",  # Cor vermelha para indicar ação destrutiva
+            hover_color="#FF1744",
+            command=self.clear_fields,
+        )
+        self.clear_btn.grid(row=0, column=0, padx=(0, 5), sticky="ew")
+
+        # Botão copiar
+        self.copy_btn = ctk.CTkButton(
+            button_frame, text="Copiar", fg_color="#7E57C2", command=self.copy_template
+        )
+        self.copy_btn.grid(row=0, column=1, padx=(5, 0), sticky="ew")
 
     def toggle_always_on_top(self):
         current = self.attributes("-topmost")
@@ -125,15 +154,19 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self.attributes("-topmost", new_state)
         self.pin_button.configure(fg_color="green" if new_state else self.theme_manager.get_theme_default_color(ctk.CTkButton, "fg_color"))
         self.pin_button.configure(text="📌" if new_state else "📍")
-        if new_state:
-            TemplateApp.show_snackbar("PIN ativado!", toast_type="info")
-        else:
-            TemplateApp.show_snackbar("PIN desativado!", toast_type="info")
+        if hasattr(self.app, "show_snackbar"):
+            self.app.show_snackbar(
+                "PIN " + ("ativado!" if new_state else "desativado!"), toast_type="info"
+            )
 
     def load_template(self, template_name):
+        """Carrega o template selecionado e configura os campos dinamicamente"""
+        logger.info(f"Carregando template: {template_name}")
         from main_window import placeholder_engine  # Importa aqui para evitar import circular
         import json
         import os
+
+        logging.info(f"Carregando template '{template_name}' no Modo Simples...")
 
         # Salva valores antigos dos campos antes de trocar de template
         old_values = {}
@@ -237,7 +270,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             elif field in ("Procedimento Executado", "Problema Relatado"):
                 entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field_label}")
                 if hasattr(self, "clear_on_switch") and not self.clear_on_switch.get():
-                    valor_antigo = old_values.get(field, None)
+                    valor_antigo = old_values.get(field)
                     if valor_antigo not in (None, ""):
                         entry.insert(0, valor_antigo)
                 entry.grid(row=i, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
@@ -255,8 +288,11 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                         textbox.insert("1.0", val)
                     textbox.grid(row=row_idx, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
                     self.entries[field_name] = textbox
-                    textbox.after(1, lambda: textbox.configure(border_color=current_border_color))
-                    textbox.border_color = current_border_color
+                    # Aplica a cor da borda e faz log da mudança
+                    textbox.configure(border_color=current_border_color)
+                    logging.debug(
+                        f"Cor da borda atualizada para {current_border_color} no campo {field_name}"
+                    )
                     textbox.focus()
                     textbox.bind("<FocusOut>", lambda e, fn=field_name, r=row_idx: to_entry(e, fn, r))
 
@@ -344,7 +380,10 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             self.geometry(f"400x{final_height}")                
 
     def copy_template(self):
+        """Processa o template com os valores dos campos e copia para o clipboard"""
         from main_window import placeholder_engine  # Importa aqui para evitar import circular
+
+        logging.info("Copiando template processado para o clipboard...")
 
         template_name = self.template_var.get()
         if not template_name:
@@ -377,24 +416,43 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                 true_val = match.group(2)
                 false_val = match.group(3)
                 val = field_values.get(field, "")
-                # Considera "Sim", "sim", "True", True, "1", 1 como verdadeiro
-                if str(val).lower() in ("sim", "true", "1"):
-                    return true_val
-                else:
-                    return false_val
+                # Valores considerados como verdadeiro
+                val_lower = str(val).lower()
+                return true_val if val_lower in {"sim", "true", "1"} else false_val
             return re.sub(r"\$([^\$?]+)\?([^\|$]+)\|([^\$]+)\$", cond_repl, template)
 
         content = process_conditionals(content, field_values)
 
         # 3. Substitui placeholders simples
         for key, value in field_values.items():
-            content = content.replace(f"${key}$", value if value else "")
+            content = content.replace(f"${key}$", value or "")
 
         # 4. Substitui placeholders automáticos/dinâmicos
         content = placeholder_engine.process(content)
 
         import pyperclip
         pyperclip.copy(content)
+        logging.debug("Template copiado com sucesso para o clipboard")
+
+    def clear_fields(self):
+        """Limpa todos os campos do formulário"""
+        logging.info("Limpando campos do formulário no Modo Simples...")
+        # Itera pelos widgets no entries
+        for field_name, widget in self.entries.items():
+            # Agrupa widgets por tipo de ação
+            if isinstance(widget, (ctk.CTkCheckBox, ctk.CTkSwitch)):
+                widget.deselect()
+            elif isinstance(widget, (ctk.StringVar)):
+                widget.set("")  # Para radiobuttons
+            elif isinstance(widget, (ctk.CTkEntry)):
+                widget.delete(0, "end")
+                widget.configure(placeholder_text=field_name)
+            elif isinstance(widget, (ctk.CTkTextbox)):
+                widget.delete("1.0", "end")
+
+        # Mostra mensagem de feedback
+        if hasattr(self.app, "show_snackbar"):
+            self.app.show_snackbar("Campos limpos!", toast_type="info")
 
     def copy_and_close(self):
         template_name = self.template_var.get()
@@ -406,7 +464,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
 
         for key, entry in self.entries.items():
             value = entry.get()
-            content = content.replace(f"${key}$", value if value else "")
+            content = content.replace(f"${key}$", value or "")
 
         import pyperclip
         pyperclip.copy(content)
@@ -418,11 +476,12 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         return after_id
 
     def _cancel_all_afters(self):
+        """Cancela todos os callbacks agendados de forma segura"""
+        from contextlib import suppress
+
         for after_id in list(self._after_ids):
-            try:
+            with suppress(Exception):
                 self.after_cancel(after_id)
-            except Exception:
-                pass
             self._after_ids.discard(after_id)
 
     def on_close(self):
