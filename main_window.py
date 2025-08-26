@@ -1,3 +1,4 @@
+from typing import Self
 import customtkinter as ctk
 import pyperclip
 import json
@@ -3284,7 +3285,11 @@ class TemplateApp(ctk.CTk):
             mostrar_card(opcoes[0])
 
     def show_snackbar(
-        self, message="Copiado com sucesso!", duration=1500, toast_type="success"
+        self,
+        message="Copiado com sucesso!",
+        duration=1500,
+        toast_type="success",
+        parent=None,
     ):
         styles = {
             "success": {"fg": "#388E3C", "icon": "✔"},
@@ -3297,8 +3302,11 @@ class TemplateApp(ctk.CTk):
         style = styles.get(toast_type, styles["default"])
         text = f"{style['icon']} {message}"
 
+        # Usa o parent fornecido ou self
+        target = parent if parent is not None else self
+
         # Cria a janela flutuante
-        snackbar = ctk.CTkToplevel(self)
+        snackbar = ctk.CTkToplevel(target)
         snackbar.overrideredirect(True)
         snackbar.attributes("-topmost", True)
         snackbar.configure(fg_color=style["fg"])
@@ -3313,11 +3321,11 @@ class TemplateApp(ctk.CTk):
         )
         label.pack()
 
-        self.update_idletasks()
+        target.update_idletasks()
         width = snackbar.winfo_reqwidth()
         height = snackbar.winfo_reqheight()
-        x = self.winfo_x() + int((self.winfo_width() - width) / 2)
-        y = self.winfo_y() + self.winfo_height() - height - 20
+        x = target.winfo_x() + int((target.winfo_width() - width) / 2)
+        y = target.winfo_y() + target.winfo_height() - height - 20
 
         snackbar.geometry(f"{width}x{height}+{x}+{y}")
         snackbar.attributes("-alpha", 0)
@@ -3328,7 +3336,7 @@ class TemplateApp(ctk.CTk):
                 snackbar.attributes("-alpha", 1.0)
             else:
                 snackbar.attributes("-alpha", opacity)
-                self._safe_after(20, lambda: fade_in(opacity + 0.1))
+                target.after(20, lambda: fade_in(opacity + 0.1))
 
         fade_in()
 
@@ -3338,9 +3346,9 @@ class TemplateApp(ctk.CTk):
                 snackbar.destroy()
             else:
                 snackbar.attributes("-alpha", opacity)
-                self._safe_after(30, lambda: fade_out(opacity - 0.1))
+                target.after(30, lambda: fade_out(opacity - 0.1))
 
-        self._safe_after(duration, lambda: fade_out())
+        target.after(duration, lambda: fade_out())
 
     def process_conditionals(self, template, field_values):
         """

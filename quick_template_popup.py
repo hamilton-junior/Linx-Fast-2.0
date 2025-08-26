@@ -72,7 +72,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self.pin_button.grid(row=1, column=0, padx=(10, 5), pady=5, sticky="w")
 
         # Toggle para limpar campos ao trocar template
-        self.clear_on_switch = ctk.BooleanVar(value=True)
+        self.clear_on_switch = ctk.BooleanVar(value=False)
         self.clear_toggle = ctk.CTkCheckBox(
             self,
             text="",  # Sem texto, só o checkbox
@@ -121,32 +121,35 @@ class QuickTemplatePopup(ctk.CTkToplevel):
 
         # Frame para os campos
         self.form_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.form_frame.grid(row=2, column=0, columnspan=3, padx=20, pady=(5, 0), sticky="nsew")
+        self.form_frame.grid(
+            row=2, column=0, columnspan=3, padx=10, pady=(1, 0), sticky="nsew"
+        )
         self.form_frame.grid_columnconfigure(0, weight=1)
 
-        # Frame para botões de ação
-        button_frame = ctk.CTkFrame(self, fg_color="transparent")
-        button_frame.grid(
-            row=3, column=0, columnspan=3, pady=(15, 15), padx=20, sticky="ew"
+        # Botão copiar (centralizado)
+        self.copy_btn = ctk.CTkButton(
+            self.form_frame,
+            text="Copiar",
+            fg_color="#7E57C2",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            width=3,
+            anchor="center",
+            command=self.copy_template,
         )
-        button_frame.grid_columnconfigure(0, weight=1)  # Clear button
-        button_frame.grid_columnconfigure(1, weight=1)  # Copy button
+        self.copy_btn.grid(row=0, column=0, padx=(0, 37), sticky="ew")
 
-        # Botão limpar campos
+        # Botão limpar campos (direita, igual ao main_window)
         self.clear_btn = ctk.CTkButton(
-            button_frame,
-            text="Limpar Campos",
-            fg_color="#FF5252",  # Cor vermelha para indicar ação destrutiva
-            hover_color="#FF1744",
+            self.form_frame,
+            text="❌",
+            fg_color="#A94444",
+            hover_color="#FF5252",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            width=3,
+            anchor="center",
             command=self.clear_fields,
         )
-        self.clear_btn.grid(row=0, column=0, padx=(0, 5), sticky="ew")
-
-        # Botão copiar
-        self.copy_btn = ctk.CTkButton(
-            button_frame, text="Copiar", fg_color="#7E57C2", command=self.copy_template
-        )
-        self.copy_btn.grid(row=0, column=1, padx=(5, 0), sticky="ew")
+        self.clear_btn.grid(row=0, column=0, padx=(37, 0), sticky="e")
 
     def toggle_always_on_top(self):
         current = self.attributes("-topmost")
@@ -156,7 +159,9 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self.pin_button.configure(text="📌" if new_state else "📍")
         if hasattr(self.app, "show_snackbar"):
             self.app.show_snackbar(
-                "PIN " + ("ativado!" if new_state else "desativado!"), toast_type="info"
+                "PIN " + ("ativado!" if new_state else "desativado!"),
+                toast_type="info",
+                parent=self,
             )
 
     def load_template(self, template_name):
@@ -273,7 +278,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                     valor_antigo = old_values.get(field)
                     if valor_antigo not in (None, ""):
                         entry.insert(0, valor_antigo)
-                entry.grid(row=i, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
+                entry.grid(row=i, column=0, sticky="e", padx=(10, 0), pady=(2, 2))
                 self.entries[field] = entry
 
                 def to_textbox(event, field_name=field, row_idx=i):
@@ -286,7 +291,9 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                     textbox = ctk.CTkTextbox(self.form_frame, height=60, wrap="word", border_width=2)
                     if val:
                         textbox.insert("1.0", val)
-                    textbox.grid(row=row_idx, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
+                    textbox.grid(
+                        row=row_idx, column=0, sticky="e", padx=(10, 0), pady=(2, 2)
+                    )
                     self.entries[field_name] = textbox
                     # Aplica a cor da borda e faz log da mudança
                     textbox.configure(border_color=current_border_color)
@@ -305,7 +312,9 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                     entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field_label}")
                     if val:
                         entry.insert(0, val)
-                    entry.grid(row=row_idx, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
+                    entry.grid(
+                        row=row_idx, column=0, sticky="e", padx=(10, 0), pady=(2, 2)
+                    )
                     self.entries[field_name] = entry
                     entry.bind("<FocusIn>", lambda e, fn=field_name, r=row_idx: to_textbox(e, fn, r))
 
@@ -316,7 +325,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                     valor_antigo = old_values.get(field)
                     if valor_antigo not in (None, ""):
                         entry.insert(0, valor_antigo)
-                entry.grid(row=i, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
+                entry.grid(row=i, column=0, sticky="e", padx=(10, 0), pady=(2, 2))
                 self.entries[field] = entry
 
             # Se o campo for 'Nome', adiciona trace para atualizar o título
@@ -338,13 +347,45 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                 except Exception:
                     pass
 
+        # Adiciona os botões ao final do form_frame (sempre na última linha)
+        btn_row = len(used_fields)
+        self.form_frame.grid_columnconfigure(0, weight=1)
+        self.form_frame.grid_columnconfigure(1, weight=0)
+        self.form_frame.grid_columnconfigure(2, weight=0)
+
+        self.copy_btn = ctk.CTkButton(
+            self.form_frame,
+            text="Copiar",
+            fg_color="#7E57C2",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            width=3,
+            command=self.copy_template,
+        )
+        self.copy_btn.grid(
+            row=btn_row, column=0, padx=(0, 37), pady=(15, 0), sticky="ew"
+        )
+
+        self.clear_btn = ctk.CTkButton(
+            self.form_frame,
+            text="❌",
+            fg_color="#A94444",
+            hover_color="#FF5252",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            width=3,
+            command=self.clear_fields,
+        )
+        self.clear_btn.grid(
+            row=btn_row, column=0, padx=(37, 0), pady=(15, 0), sticky="e"
+        )
+
         # Ajusta o tamanho da janela com base nos campos
         self.update_idletasks()
         form_height = self.form_frame.winfo_reqheight()
 
         if len(self.entries) == 0:
             # Reposiciona o botão Copiar logo abaixo do dropdown
-            self.copy_btn.grid_configure(row=2, pady=(10, 10))
+            self.copy_btn.grid_configure(row=0, column=0, pady=(10, 0))
+            self.clear_btn.grid_configure(row=0, column=0, pady=(10, 0))
             self.update_idletasks()
             # Altura dos elementos fixos
             title_height = 0
@@ -360,15 +401,13 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                 if info.get("row") == 1 and info.get("column") in (0, 1):
                     dropdown_height = max(dropdown_height, widget.winfo_reqheight())    
             # Margens e paddings
-            padding = 30  # espaço para margens/paddings
+            padding = 15  # espaço para margens/paddings
             min_height = title_height + dropdown_height + copy_btn_height + padding
-            if min_height < 170:
-                min_height = 170
+            if min_height < 150:
+                min_height = 150
             self.geometry(f"400x{min_height}")
         else:
-            # Mantém o botão Copiar abaixo dos campos
-            self.copy_btn.grid_configure(row=3, pady=(15, 15))
-            # Altura base para botões e margens
+            # Mantém os botões abaixo dos campos
             base_height = 140
             if form_height < 40:
                 form_height = 40
@@ -387,7 +426,9 @@ class QuickTemplatePopup(ctk.CTkToplevel):
 
         template_name = self.template_var.get()
         if not template_name:
-            messagebox.showerror("Erro", "Selecione um template.")
+            self.app.show_snackbar(
+                "Selecione um template!", toast_type="error", parent=self
+            )
             return
 
         content = self.manager.get_template(template_name)
@@ -433,6 +474,9 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         import pyperclip
         pyperclip.copy(content)
         logging.debug("Template copiado com sucesso para o clipboard")
+        self.app.show_snackbar(
+            "Copiado com sucesso!", toast_type="success", parent=self
+        )
 
     def clear_fields(self):
         """Limpa todos os campos do formulário"""
@@ -452,7 +496,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
 
         # Mostra mensagem de feedback
         if hasattr(self.app, "show_snackbar"):
-            self.app.show_snackbar("Campos limpos!", toast_type="info")
+            self.app.show_snackbar("Campos limpos!", toast_type="info", parent=self)
 
     def copy_and_close(self):
         template_name = self.template_var.get()
