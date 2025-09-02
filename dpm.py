@@ -1,7 +1,14 @@
 import json
 import os
 from datetime import date, datetime
+import logging
+from logger_config import auto_log_functions
 
+# Get the module logger
+logger = logging.getLogger(__name__)
+
+
+@auto_log_functions
 class DailyPasswordManager:
     def __init__(self, file_path="config.json"):
         self.file_path = file_path
@@ -11,7 +18,7 @@ class DailyPasswordManager:
         self._load_password()
 
     def _log(self, msg):
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
+        logger.info(msg)
 
     def _read_config(self):
         if self._config_cache is not None:

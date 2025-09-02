@@ -1,6 +1,13 @@
 import os
 import json
+import logging
+from logger_config import auto_log_functions
 
+# Get the module logger
+logger = logging.getLogger(__name__)
+
+
+@auto_log_functions
 class TemplateMeta:
     def __init__(self, base_dir="templates"):
         self.meta_path = os.path.join(base_dir, "meta.json")

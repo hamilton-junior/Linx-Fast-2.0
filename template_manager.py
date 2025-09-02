@@ -2,10 +2,13 @@ import os
 import re
 import logging
 from template_meta import TemplateMeta
+from logger_config import auto_log_functions
 
 # Get the module logger
 logger = logging.getLogger(__name__)
 
+
+@auto_log_functions
 class TemplateManager:
     def __init__(self, template_dir="templates"):
         logger.info(f"Iniciando Template Manager com diretório: {template_dir}")
