@@ -3,12 +3,14 @@ from tkinter import StringVar
 from tkinter import messagebox
 from app import TemplateApp
 from theme_manager import ThemeManager
-
 import logging
+from logger_config import auto_log_functions
 
 # Get the module logger
 logger = logging.getLogger(__name__)
 
+
+@auto_log_functions
 class QuickTemplatePopup(ctk.CTkToplevel):
     def __init__(self, master, manager):
         logger.info("Iniciando Quick Template Popup")

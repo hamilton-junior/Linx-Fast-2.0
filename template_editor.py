@@ -2,10 +2,13 @@ import customtkinter as ctk
 from tkinter import messagebox
 from customtkinter import CTkInputDialog
 import logging
+from logger_config import auto_log_functions
 
 # Get the module logger
 logger = logging.getLogger(__name__)
 
+
+@auto_log_functions
 class TemplateEditor(ctk.CTkToplevel):
     def __init__(self, master, manager, get_placeholders_callback, current_template="Template Padrão"):
         logger.info(f"Iniciando Editor de Templates para: {current_template}")
