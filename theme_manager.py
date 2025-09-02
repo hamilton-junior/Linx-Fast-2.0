@@ -1,8 +1,14 @@
 import customtkinter as ctk
 import tkinter as tk
 import os
+import logging
+from logger_config import auto_log_functions
+
+# Get the module logger
+logger = logging.getLogger(__name__)
 
 
+@auto_log_functions
 class ThemeManager:
     def __init__(self, theme_name="green", mode="dark"):
         self.theme_name = theme_name

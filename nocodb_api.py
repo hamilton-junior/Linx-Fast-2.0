@@ -1,5 +1,12 @@
 import requests
+import logging
+from logger_config import log_function_call
 
+# Get the module logger
+logger = logging.getLogger(__name__)
+
+
+@log_function_call
 def fetch_nocodb_templates(base_url, base_name, table_name, token=None):
     url = f"{base_url}/api/v1/db/data/v1/{base_name}/{table_name}"
     headers = {

@@ -1,9 +1,17 @@
 import customtkinter as ctk
+import logging
+from logger_config import auto_log_functions
+
 try:
     from version import VERSION, BUILD_DATE
 except ImportError:
     VERSION, BUILD_DATE = "dev", "dev"
 
+# Get the module logger
+logger = logging.getLogger(__name__)
+
+
+@auto_log_functions
 class SettingsWindow(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)

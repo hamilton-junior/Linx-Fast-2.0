@@ -16,6 +16,7 @@ from dpm import DailyPasswordManager
 from settings_window import SettingsWindow
 from customtkinter import CTkInputDialog
 from nocodb_api import fetch_nocodb_templates
+from logger_config import auto_log_functions
 
 # Get the module logger
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ logger = logging.getLogger("main_window")
 
 
 # --- PlaceholderEngine e instância global ---
+@auto_log_functions
 class PlaceholderEngine:
     """
     Manages dynamic placeholder substitution in text templates.
@@ -100,6 +102,7 @@ placeholder_engine.register_handler(
 )
 
 
+@auto_log_functions
 class TemplateApp(ctk.CTk):
     def __init__(self):
         logger.info("Iniciando TemplateApp...")
