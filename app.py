@@ -1,10 +1,10 @@
-import logging
 from logger_config import setup_logging
+import logging
 from main_window import TemplateApp
 
+setup_logging()
+
 if __name__ == "__main__":
-    # Configura logging
-    setup_logging()
     logger = logging.getLogger("app")
     logger.info("Iniciando Linx Fast...")
 

@@ -283,7 +283,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                 entry.grid(row=i, column=0, sticky="e", padx=(10, 0), pady=(2, 2))
                 self.entries[field] = entry
 
-                def to_textbox(event, field_name=field, row_idx=i):
+                def to_textbox(field_name=field, row_idx=i):
                     current_widget = self.entries[field_name]
                     if isinstance(current_widget, ctk.CTkTextbox):
                         return
@@ -297,15 +297,32 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                         row=row_idx, column=0, sticky="e", padx=(10, 0), pady=(2, 2)
                     )
                     self.entries[field_name] = textbox
-                    # Aplica a cor da borda e faz log da mudança
+
                     textbox.configure(border_color=current_border_color)
                     logging.debug(
                         f"Cor da borda atualizada para {current_border_color} no campo {field_name}"
                     )
                     textbox.focus()
-                    textbox.bind("<FocusOut>", lambda e, fn=field_name, r=row_idx: to_entry(e, fn, r))
+                    # TAB navega para o próximo campo (transforma em Entry antes de avançar)
+                    def on_tab(e, fn=field_name):
+                        to_entry(fn, row_idx)
+                        self._safe_after(1, lambda: focus_next_field_linear(fn))
+                        return "break"
 
-                def to_entry(event, field_name=field, row_idx=i):
+                    def on_shift_tab(e, fn=field_name):
+                        to_entry(fn, row_idx)
+                        self._safe_after(1, lambda: focus_prev_field_linear(fn))
+                        return "break"
+
+                    textbox.bind("<Tab>", on_tab)
+                    textbox.bind("<ISO_Left_Tab>", on_shift_tab)
+                    textbox.bind("<Shift-Tab>", on_shift_tab)
+                    textbox.bind(
+                        "<FocusOut>",
+                        lambda e, fn=field_name, r=row_idx: to_entry(fn, r),
+                    )
+
+                def to_entry(field_name=field, row_idx=i):
                     current_widget = self.entries[field_name]
                     if not isinstance(current_widget, ctk.CTkTextbox):
                         return
@@ -318,9 +335,72 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                         row=row_idx, column=0, sticky="e", padx=(10, 0), pady=(2, 2)
                     )
                     self.entries[field_name] = entry
-                    entry.bind("<FocusIn>", lambda e, fn=field_name, r=row_idx: to_textbox(e, fn, r))
+                    # Intercepta TAB e Shift+TAB no Entry ANTES de expandir
+                    def on_entry_tab(event, fn=field_name):
+                        if event.keysym == "Tab":
+                            focus_next_field_linear(fn)
+                            return "break"
+                        elif event.keysym in ("ISO_Left_Tab", "Shift_L", "Shift_R"):
+                            to_entry(fn, row_idx)
+                            self._safe_after(1, lambda: focus_prev_field_linear(fn))
+                            return "break"
+                        return "break"
 
-                entry.bind("<FocusIn>", lambda e, fn=field, r=i: to_textbox(e, fn, r))
+                    entry.bind("<Tab>", on_entry_tab)
+                    entry.bind("<ISO_Left_Tab>", on_entry_tab)
+                    entry.bind("<Shift-Tab>", on_entry_tab)
+                    entry.bind(
+                        "<FocusIn>",
+                        lambda e, fn=field_name, r=row_idx: to_textbox(fn, r),
+                    )
+
+                # Funções de navegação linear entre campos
+                def focus_next_field_linear(current_name):
+                    fields = (
+                        self.ordered_fields
+                        if hasattr(self, "ordered_fields")
+                        else list(self.entries.keys())
+                    )
+                    try:
+                        idx = fields.index(current_name)
+                        next_key = fields[(idx + 1) % len(fields)]
+                        entry = self.entries[next_key]
+                        entry.focus()
+                    except (ValueError, IndexError):
+                        pass
+
+                def focus_prev_field_linear(current_name):
+                    fields = (
+                        self.ordered_fields
+                        if hasattr(self, "ordered_fields")
+                        else list(self.entries.keys())
+                    )
+                    try:
+                        idx = fields.index(current_name)
+                        prev_idx = (idx - 1) % len(fields)
+                        prev_key = fields[prev_idx]
+                        entry = self.entries[prev_key]
+                        if isinstance(entry, ctk.CTkTextbox):
+                            entry.event_generate("<FocusOut>")
+                            self._safe_after(
+                                1, lambda k=prev_key: self.entries[k].focus()
+                            )
+                        else:
+                            entry.focus()
+                    except (ValueError, IndexError):
+                        pass
+
+                entry.bind(
+                    "<Tab>", lambda e, fn=field, r=i: focus_next_field_linear(fn)
+                )
+                entry.bind(
+                    "<ISO_Left_Tab>",
+                    lambda e, fn=field, r=i: focus_prev_field_linear(fn),
+                )
+                entry.bind(
+                    "<Shift-Tab>", lambda e, fn=field, r=i: focus_prev_field_linear(fn)
+                )
+                entry.bind("<FocusIn>", lambda e, fn=field, r=i: to_textbox(fn, r))
             else:
                 entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field_label}")
                 if hasattr(self, "clear_on_switch") and not self.clear_on_switch.get():
@@ -329,6 +409,36 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                         entry.insert(0, valor_antigo)
                 entry.grid(row=i, column=0, sticky="e", padx=(10, 0), pady=(2, 2))
                 self.entries[field] = entry
+
+                # Aplica binds de navegação TAB/Shift-TAB para todos os CTkEntry (inclusive Nome)
+                def on_entry_tab(event, fn=field):
+                    fields = (
+                        self.ordered_fields
+                        if hasattr(self, "ordered_fields")
+                        else list(self.entries.keys())
+                    )
+                    try:
+                        idx = fields.index(fn)
+                        if event.keysym == "Tab":
+                            next_key = fields[(idx + 1) % len(fields)]
+                            self.entries[next_key].focus()
+                            return "break"
+                        elif event.keysym in (
+                            "ISO_Left_Tab",
+                            "Shift_L",
+                            "Shift_R",
+                            "Shift-Tab",
+                        ):
+                            prev_key = fields[(idx - 1) % len(fields)]
+                            self.entries[prev_key].focus()
+                            return "break"
+                    except Exception:
+                        pass
+                    return "break"
+
+                entry.bind("<Tab>", on_entry_tab)
+                entry.bind("<ISO_Left_Tab>", on_entry_tab)
+                entry.bind("<Shift-Tab>", on_entry_tab)
 
             # Se o campo for 'Nome', adiciona trace para atualizar o título
             if field == "Nome":
@@ -379,6 +489,32 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self.clear_btn.grid(
             row=btn_row, column=0, padx=(37, 0), pady=(15, 0), sticky="e"
         )
+
+        # --- REPLICA LÓGICA DO main_window: lista ordenada dos campos navegáveis ---
+        self.ordered_fields = [
+            k
+            for k in used_fields
+            if isinstance(self.entries.get(k), (ctk.CTkEntry, ctk.CTkTextbox))
+        ]
+        # Garante que todos os campos CTkEntry criados no loop acima (inclusive Nome) estejam na lista
+        for k in self.entries:
+            if k not in self.ordered_fields and isinstance(
+                self.entries[k], (ctk.CTkEntry, ctk.CTkTextbox)
+            ):
+                self.ordered_fields.append(k)
+
+        # Foca automaticamente o primeiro campo navegável após criar os campos
+        self.update_idletasks()
+
+        def focus_first_entry():
+            if self.ordered_fields:
+                entry = self.entries[self.ordered_fields[0]]
+                try:
+                    entry.focus()
+                except Exception:
+                    pass
+
+        self._safe_after(100, focus_first_entry)
 
         # Ajusta o tamanho da janela com base nos campos
         self.update_idletasks()
