@@ -512,37 +512,76 @@ class TemplateApp(ctk.CTk):
 
     def _handle_textbox_focusout(self, event, field_name, textbox, to_entry_fn):
         """Gerencia a perda de foco de um campo textbox"""
-        # Primeiro valida o campo atual
-        self._validate_field_and_update_color(textbox, field_name)
+        # Se for um campo expansível, atualiza para a cor normal se estiver em erro
+        if field_name in getattr(self, "expandable_fields", []):
+            if textbox.cget("border_color") == self.ERROR_COLOR:
+                self._update_single_field_border(field_name, textbox)
+        else:
+            # Para outros campos, valida normalmente
+            self._validate_field_and_update_color(textbox, field_name)
 
-        if not event.widget.focus_get():
-            # Se realmente perdeu o foco (não é só um clique dentro do campo)
-            current_border_color = textbox.cget("border_color")
+        # Verifica se o campo ainda tem foco após um pequeno delay
+        def _check_focus():
+            # Se o widget não existe mais ou não tem mais foco, converte para entry
+            if (
+                not textbox.winfo_exists()
+                or textbox.focus_get() != textbox
+                or not textbox.focus_get()
+            ):
+                current_border_color = textbox.cget("border_color")
+                # Primeiro converte para entry
+                to_entry_fn(field_name)
 
-            # Primeiro converte para entry
-            to_entry_fn(field_name)
+                def _after_convert():
+                    entry = self.entries[field_name]
+                    # Para campos expansíveis, sempre usa a cor normal
+                    if field_name in getattr(self, "expandable_fields", []):
+                        self._update_single_field_border(field_name, entry)
+                    else:
+                        # Para outros campos, mantém a cor anterior
+                        entry.configure(border_color=current_border_color)
+                        self._validate_field_and_update_color(entry, field_name)
 
-            def _after_convert():
-                entry = self.entries[field_name]
-                # Transfere a cor da borda do textbox para o entry
-                entry.configure(border_color=current_border_color)
-                self._validate_field_and_update_color(entry, field_name)
+                # Depois atualiza a cor
+                self._safe_after(10, _after_convert)
 
-            # Depois valida e atualiza a cor
-            self._safe_after(10, _after_convert)
+        # Aguarda um momento para verificar o estado do foco
+        self._safe_after(50, _check_focus)
 
     def _validate_field_and_update_color(self, widget, field_name):
         """Valida o campo e atualiza a cor de acordo com o conteúdo"""
         if isinstance(widget, ctk.CTkTextbox):
-            value = widget.get("1.0", "end-1c")
+            value = widget.get("1.0", "end-1c").strip()
         else:
-            value = widget.get()
+            value = widget.get().strip()
 
-        if not value or value == "Não":
-            widget.configure(border_color=self.ERROR_COLOR)
+        logger.debug(f"Validando campo: {field_name}")
+        logger.debug(f"  Tipo de widget: {type(widget).__name__}")
+        logger.debug(
+            f"  É expansível: {field_name in getattr(self, 'expandable_fields', [])}"
+        )
+        logger.debug(f"  Valor: {value}")
+
+        # Se for um campo expansível, nunca fica vermelho
+        if field_name in getattr(self, "expandable_fields", []):
+            # Se estiver vermelho, volta para a cor normal
+            if widget.cget("border_color") == self.ERROR_COLOR:
+                self._update_single_field_border(field_name, widget)
+            return
+
+        # Para outros campos, atualiza a cor com base no valor
+        current_color = widget.cget("border_color")
+        if not value:
+            if current_color != self.ERROR_COLOR:
+                widget.configure(border_color=self.ERROR_COLOR)
         else:
-            self.animate_field_success(widget)
-            self._update_single_field_border(field_name, widget)
+            if current_color == self.ERROR_COLOR:
+                # Se saiu do estado de erro, faz a animação de sucesso
+                self.animate_field_success(widget)
+                self._update_single_field_border(field_name, widget)
+            elif current_color != widget._apply_appearance_mode(widget._border_color):
+                # Se a cor atual é diferente da que deveria ser
+                self._update_single_field_border(field_name, widget)
 
     def _push_undo(self):
         if getattr(self, "_restoring_undo_redo", False):
@@ -830,6 +869,9 @@ class TemplateApp(ctk.CTk):
                     return current_widget
                 if val is None:
                     val = current_widget.get()
+                # Se o campo estiver em estado de erro, atualiza para a cor normal
+                if current_widget.cget("border_color") == self.ERROR_COLOR:
+                    self._update_single_field_border(field_name, current_widget)
                 current_widget.grid_forget()
                 textbox = ctk.CTkTextbox(
                     row_frame, height=60, wrap="word", border_width=2
@@ -837,13 +879,8 @@ class TemplateApp(ctk.CTk):
                 if val:
                     textbox.insert("1.0", val)
                 textbox.grid(row=0, column=1, sticky="ew")
-                # Preserva a cor da borda do widget anterior
-                if isinstance(current_widget, ctk.CTkEntry):
-                    current_border_color = current_widget.cget("border_color")
-                    if current_border_color == self.ERROR_COLOR:
-                        textbox.configure(border_color=self.ERROR_COLOR)
-                    else:
-                        self._update_single_field_border(field_name, textbox)
+                # Configura a cor da borda para a cor normal
+                self._update_single_field_border(field_name, textbox)
                 self.entries[field_name] = textbox
                 textbox.focus()
                 # Adiciona validação de campo vazio
@@ -879,18 +916,16 @@ class TemplateApp(ctk.CTk):
                 if not isinstance(current_widget, ctk.CTkTextbox):
                     return
                 val = current_widget.get("1.0", "end-1c")
+                # Se o campo estiver em estado de erro, atualiza para a cor normal
+                if current_widget.cget("border_color") == self.ERROR_COLOR:
+                    self._update_single_field_border(field_name, current_widget)
                 current_widget.grid_forget()
                 entry = ctk.CTkEntry(row_frame, placeholder_text=f"{field_name}")
                 if val:
                     entry.insert(0, val)
                 entry.grid(row=0, column=1, sticky="ew")
-                # Preserva a cor da borda do widget anterior
-                if isinstance(current_widget, ctk.CTkTextbox):
-                    current_border_color = current_widget.cget("border_color")
-                    if current_border_color == self.ERROR_COLOR:
-                        entry.configure(border_color=self.ERROR_COLOR)
-                    else:
-                        self._update_single_field_border(field_name, entry)
+                # Configura a cor da borda para a cor normal
+                self._update_single_field_border(field_name, entry)
                 # Adiciona validação na perda de foco
                 entry.bind(
                     "<FocusOut>",
@@ -3538,6 +3573,12 @@ class TemplateApp(ctk.CTk):
         return show_tooltip, hide_tooltip
 
     def animate_field_success(self, entry):
+        """Anima um campo quando ele é validado com sucesso.
+
+        Muda temporariamente a cor da borda para verde e faz uma animação
+        de pulso suave. Depois restaura a cor da borda baseada no template
+        atual.
+        """
         if self.visual_feedback_enabled:
             entry.configure(border_color="#00C853")  # verde sucesso
 
