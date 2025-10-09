@@ -43,10 +43,10 @@ def auto_log_functions(cls):
 
 def get_log_level():
     """
-    Obtém o nível de log a partir da variável de ambiente LINXFASTLOGLEVEL.
+    Obtém o nível de log a partir da variável de ambiente LFASTLOGLEVEL.
     Aceita tanto nomes (info, warn, error, debug, etc) quanto números (10, 20, 30, ...).
     """
-    env_level = os.getenv("LINXFASTLOGLEVEL", "INFO")
+    env_level = os.getenv("LFASTLOGLEVEL", "INFO")
     # Tenta converter para inteiro
     try:
         level_num = int(env_level)
@@ -68,7 +68,7 @@ def get_log_level():
     if hasattr(logging, env_level_name):
         return getattr(logging, env_level_name)
     print(
-        f"[DEBUG] LINXFASTLOGLEVEL={os.getenv('LINXFASTLOGLEVEL')}, log_level={env_level_name} ({logging.getLevelName(env_level_name)})"
+        f"[DEBUG] LFASTLOGLEVEL={os.getenv('LFASTLOGLEVEL')}, log_level={env_level_name} ({logging.getLevelName(env_level_name)})"
     )
 
     return logging.INFO
@@ -91,7 +91,7 @@ def setup_logging():
     log_level = get_log_level()
     # Loga o valor lido da variável de ambiente para depuração
     print(
-        f"[LOG VAR] LINXFASTLOGLEVEL={os.getenv('LINXFASTLOGLEVEL')}, log_level={log_level} ({logging.getLevelName(log_level)})"
+        f"[LOG VAR] LFASTLOGLEVEL={os.getenv('LFASTLOGLEVEL')}, log_level={log_level} ({logging.getLevelName(log_level)})"
     )
 
     # Remove handlers antigos para evitar logs duplicados
@@ -117,5 +117,5 @@ def setup_logging():
     root_logger.addHandler(console_handler)
 
     logging.info(
-        f"Logging inicializado com o nível: {logging.getLevelName(log_level)} (from LINXFASTLOGLEVEL={os.getenv('LINXFASTLOGLEVEL')})"
+        f"Logging inicializado com o nível: {logging.getLevelName(log_level)} (from LFASTLOGLEVEL={os.getenv('LFASTLOGLEVEL')})"
     )

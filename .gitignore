@@ -1,6 +1,5 @@
 __pycache__/*
 *.spec
-config.json
 templates/Template Padrão.txt
 log/*
 config.json

@@ -29,6 +29,9 @@ except ImportError:
 # Configure logger for this module
 logger = logging.getLogger("main_window")
 
+# Define quais símbolos são exportados
+__all__ = ["TemplateApp", "placeholder_engine"]
+
 
 # --- PlaceholderEngine e instância global ---
 @auto_log_functions
@@ -510,43 +513,74 @@ class TemplateApp(ctk.CTk):
         finally:
             self._restoring_undo_redo = False
 
-    def _handle_textbox_focusout(self, event, field_name, textbox, to_entry_fn):
+    def _handle_textbox_focusout(
+        self, event, field_name: str, textbox: ctk.CTkTextbox, to_entry_fn
+    ) -> None:
         """Gerencia a perda de foco de um campo textbox"""
+        # Verifica se o textbox ainda existe
+        if not hasattr(textbox, "winfo_exists") or not textbox.winfo_exists():
+            logger.debug(f"Textbox {field_name} não existe mais")
+            return
+
         # Se for um campo expansível, atualiza para a cor normal se estiver em erro
         if field_name in getattr(self, "expandable_fields", []):
-            if textbox.cget("border_color") == self.ERROR_COLOR:
-                self._update_single_field_border(field_name, textbox)
+            try:
+                if textbox.cget("border_color") == self.ERROR_COLOR:
+                    self._update_single_field_border(field_name, textbox)
+            except Exception as e:
+                logger.debug(f"Erro ao verificar cor da borda de {field_name}: {e}")
+                return
         else:
             # Para outros campos, valida normalmente
             self._validate_field_and_update_color(textbox, field_name)
 
         # Verifica se o campo ainda tem foco após um pequeno delay
-        def _check_focus():
-            # Se o widget não existe mais ou não tem mais foco, converte para entry
-            if (
-                not textbox.winfo_exists()
-                or textbox.focus_get() != textbox
-                or not textbox.focus_get()
-            ):
-                current_border_color = textbox.cget("border_color")
-                # Primeiro converte para entry
-                to_entry_fn(field_name)
+        def _check_focus() -> None:
+            # Se o widget foi destruído, retorna
+            if not hasattr(textbox, "winfo_exists") or not textbox.winfo_exists():
+                return
 
-                def _after_convert():
-                    entry = self.entries[field_name]
-                    # Para campos expansíveis, sempre usa a cor normal
-                    if field_name in getattr(self, "expandable_fields", []):
-                        self._update_single_field_border(field_name, entry)
-                    else:
-                        # Para outros campos, mantém a cor anterior
-                        entry.configure(border_color=current_border_color)
-                        self._validate_field_and_update_color(entry, field_name)
+            # Captura o widget com foco atual de forma segura
+            try:
+                focused_widget = textbox.focus_get()
+            except Exception:
+                focused_widget = None
 
-                # Depois atualiza a cor
-                self._safe_after(10, _after_convert)
+            # Se não tem mais foco, converte para entry
+            if focused_widget != textbox:
+                try:
+                    current_border_color = textbox.cget("border_color")
+                    # Primeiro converte para entry
+                    to_entry_fn(field_name)
+
+                    def _after_convert() -> None:
+                        # Verifica se o widget ainda existe após a conversão
+                        if field_name in self.entries:
+                            entry = self.entries.get(field_name)
+                            if (
+                                entry
+                                and hasattr(entry, "winfo_exists")
+                                and entry.winfo_exists()
+                            ):
+                                # Para campos expansíveis, sempre usa a cor normal
+                                if field_name in getattr(self, "expandable_fields", []):
+                                    self._update_single_field_border(field_name, entry)
+                                else:
+                                    # Para outros campos, mantém a cor anterior
+                                    entry.configure(border_color=current_border_color)
+                                    self._validate_field_and_update_color(
+                                        entry, field_name
+                                    )
+
+                    # Agenda a atualização da cor apenas se o widget ainda existir
+                    if hasattr(self, "_safe_after"):
+                        self._safe_after(10, _after_convert)
+                except Exception as e:
+                    logger.debug(f"Erro ao converter campo {field_name}: {e}")
 
         # Aguarda um momento para verificar o estado do foco
-        self._safe_after(50, _check_focus)
+        if hasattr(self, "_safe_after"):
+            self._safe_after(50, _check_focus)
 
     def _validate_field_and_update_color(self, widget, field_name):
         """Valida o campo e atualiza a cor de acordo com o conteúdo"""
@@ -720,6 +754,63 @@ class TemplateApp(ctk.CTk):
             entry.configure(border_color=highlight_color)
         else:
             entry.configure(border_color=darker_border)
+
+    def _reset_field_value(self, widget: ctk.CTkBaseClass) -> None:
+        """Limpa o valor de um campo, tratando cada tipo de widget adequadamente"""
+        if not widget:
+            return
+
+        try:
+            # Primeiro verifica se o widget ainda existe
+            exists = hasattr(widget, "winfo_exists") and widget.winfo_exists()
+
+            # Se não existe mais, retorna
+            if not exists and not isinstance(widget, (ctk.StringVar, ctk.BooleanVar)):
+                return
+
+            # Primeiro tenta a estratégia específica para cada tipo de widget
+            if isinstance(widget, ctk.CTkTextbox):
+                widget.delete("1.0", "end")
+            elif isinstance(widget, ctk.CTkEntry):
+                widget.delete(0, "end")
+            elif isinstance(
+                widget, (ctk.StringVar, ctk.BooleanVar)
+            ):  # Para RadioButtons e outros Vars
+                widget.set("")
+            elif isinstance(widget, (ctk.CTkSwitch, ctk.CTkCheckBox)):
+                try:
+                    if hasattr(widget, "deselect"):
+                        widget.deselect()
+                    else:
+                        # Fallback se deselect não existir
+                        widget._check_state = False
+                        widget._update_image()
+                except Exception as e:
+                    logger.debug(
+                        f"Erro ao desmarcar widget {type(widget).__name__}: {e}"
+                    )
+            else:
+                # Para outros widgets, tenta em ordem:
+                # 1. delete("1.0", "end") - método específico para texto multilinha
+                # 2. delete(0, "end") - método padrão para campos de texto
+                # 3. set("") - comum em variables
+                # 4. deselect() - comum em selecionáveis
+                try:
+                    if hasattr(widget, "delete"):
+                        try:
+                            widget.delete("1.0", "end")
+                        except Exception:
+                            widget.delete(0, "end")
+                    elif hasattr(widget, "set"):
+                        widget.set("")
+                    elif hasattr(widget, "deselect"):
+                        widget.deselect()
+                except Exception as e:
+                    logger.debug(f"Erro ao limpar widget {type(widget).__name__}: {e}")
+
+        except Exception as e:
+            logger.warning(f"Erro ao limpar campo: {e}")
+            logger.debug(f"Tipo do widget: {type(widget)}")
 
     def _update_field_borders(self, placeholders=None):
         """Atualiza as cores das bordas dos campos baseado no template atual."""
@@ -1154,14 +1245,20 @@ class TemplateApp(ctk.CTk):
         logger.info("Limpando todos os campos")
         self._push_undo()
 
+        # Usa o método seguro para limpar cada campo
         for name, entry in self.entries.items():
-            if isinstance(entry, ctk.CTkTextbox):
-                entry.delete("1.0", "end")
-                entry.insert("1.0", "")
-            else:
-                entry.delete(0, "end")
-                entry.insert(0, "")
-                entry.configure(placeholder_text=name)
+            try:
+                # Primeiro reseta o valor
+                self._reset_field_value(entry)
+
+                # Depois configura o placeholder se aplicável
+                if isinstance(entry, ctk.CTkEntry):
+                    entry.configure(placeholder_text=name)
+                elif isinstance(entry, ctk.CTkTextbox):
+                    # Para textbox, insere string vazia para garantir estado consistente
+                    entry.insert("1.0", "")
+            except Exception as e:
+                logger.warning(f"Erro ao limpar campo {name}: {e}")
 
         # Atualiza o highlight dos campos após limpar
         self._update_field_borders()
@@ -1468,12 +1565,22 @@ class TemplateApp(ctk.CTk):
             valor_antigo = old_values.get(k, None)
             entry = self.entries[k]
             if valor_antigo not in (None, ""):
+                # Primeiro limpa o campo com segurança
+                self._reset_field_value(entry)
+                # Depois insere o valor antigo
                 if isinstance(entry, ctk.CTkTextbox):
-                    entry.delete("1.0", "end")
                     entry.insert("1.0", valor_antigo)
-                else:
-                    entry.delete(0, "end")
+                elif isinstance(entry, ctk.CTkEntry):
                     entry.insert(0, valor_antigo)
+                elif isinstance(
+                    entry, (ctk.StringVar, ctk.CTkSwitch, ctk.CTkCheckBox)
+                ) or hasattr(entry, "set"):
+                    try:
+                        entry.set(valor_antigo)
+                    except Exception as e:
+                        logger.warning(
+                            f"Erro ao restaurar valor {valor_antigo} para {k}: {e}"
+                        )
         # Se não houver valor antigo, deixa vazio para mostrar o placeholder
 
     def open_template_editor(self):
@@ -2366,25 +2473,30 @@ class TemplateApp(ctk.CTk):
                 self._refresh_all_template_selectors(select_template=full_name)
                 # Remove todos os templates marcados para exclusão
                 self.remover_templates_nocodb_id_menos_um()
-                # Seleciona o template recém importado na interface principal, se possível
-                if hasattr(self, "template_selector"):
-                    self.current_template = full_name
-                    self.current_template_display.set(
-                        self.template_manager.meta.get_display_name(full_name)
-                    )
-                    self.template_selector.set(
-                        self.template_manager.meta.get_display_name(full_name)
-                    )
-                    self.load_template_placeholders()
+
+                # Atualiza o estado da interface principal
+                self.current_template = full_name
+                display_name = self.template_manager.meta.get_display_name(full_name)
+                self.current_template_display.set(display_name)
+
+                # Atualiza os seletores em toda a aplicação
+                self._refresh_all_template_selectors(select_template=full_name)
+
+                # Força o carregamento do template
+                self.load_template_placeholders()
+
+                # Notifica o usuário
                 if old_category != pasta:
                     self.show_snackbar(
-                        f"Template movido para '{pasta_str}' e atualizado!",
+                        f"Template movido para '{pasta_str}' e carregado!",
                         toast_type="success",
                         duration=2500,
                     )
                 else:
                     self.show_snackbar(
-                        f"Template atualizado!", toast_type="success", duration=2500
+                        "Template atualizado e carregado!",
+                        toast_type="success",
+                        duration=2500,
                     )
                 compare_win.destroy()
 
@@ -3161,12 +3273,25 @@ class TemplateApp(ctk.CTk):
                     "nocodb_id"
                 ) == str(nocodb_id):
                     self.template_manager.meta.remove_meta(name)
-        self.show_snackbar(
-            f"Template '{full_name}' importado!", toast_type="success", duration=2500
-        )
+        # Recarrega os templates e seleciona o novo
         self.template_manager.load_templates()
-        self.template_selector.configure(
-            values=self.template_manager.get_display_names()
+
+        # Atualiza o estado da interface principal
+        self.current_template = full_name
+        display_name = self.template_manager.meta.get_display_name(full_name)
+        self.current_template_display.set(display_name)
+
+        # Atualiza os seletores em toda a aplicação
+        self._refresh_all_template_selectors(select_template=full_name)
+
+        # Força o carregamento do template
+        self.load_template_placeholders()
+
+        # Notifica o usuário
+        self.show_snackbar(
+            f"Template '{display_name}' importado e carregado!",
+            toast_type="success",
+            duration=2500,
         )
 
     def remover_templates_nocodb_id_menos_um(self):
@@ -3741,12 +3866,36 @@ class TemplateApp(ctk.CTk):
             valor_antigo = state["field_values"].get(k, None)
             entry = self.entries[k]
             if valor_antigo not in (None, ""):
-                if isinstance(entry, ctk.CTkTextbox):
-                    entry.delete("1.0", "end")
-                    entry.insert("1.0", valor_antigo)
-                else:
-                    entry.delete(0, "end")
-                    entry.insert(0, valor_antigo)
+                # Primeiro limpa o campo com segurança
+                self._reset_field_value(entry)
+                # Depois insere o valor antigo
+                try:
+                    if isinstance(entry, ctk.CTkTextbox):
+                        entry.insert("1.0", valor_antigo)
+                    elif isinstance(entry, ctk.CTkEntry):
+                        entry.insert(0, valor_antigo)
+                    elif isinstance(entry, (ctk.StringVar, ctk.BooleanVar)):
+                        entry.set(valor_antigo)
+                    elif isinstance(entry, (ctk.CTkSwitch, ctk.CTkCheckBox)):
+                        try:
+                            if valor_antigo.lower() in ("true", "1", "yes", "on"):
+                                if hasattr(entry, "select"):
+                                    entry.select()
+                                else:
+                                    entry._check_state = True
+                                    entry._update_image()
+                        except Exception as e:
+                            logger.debug(
+                                f"Erro ao restaurar valor {valor_antigo} para {k}: {e}"
+                            )
+                    elif hasattr(entry, "insert"):
+                        entry.insert(0, valor_antigo)
+                    elif hasattr(entry, "set"):
+                        entry.set(valor_antigo)
+                except Exception as e:
+                    logger.warning(
+                        f"Erro ao restaurar valor {valor_antigo} para {k}: {e}"
+                    )
 
     def load_theme_config(self):
         import json
@@ -3804,4 +3953,5 @@ class TemplateApp(ctk.CTk):
         self.destroy()
 
 
+# Define quais símbolos são exportados
 __all__ = ["TemplateApp", "placeholder_engine"]
