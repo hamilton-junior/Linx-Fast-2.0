@@ -25,7 +25,9 @@ class DailyPasswordManager:
             return self._config_cache
 
         if not os.path.exists(self.file_path):
-            self._log(f"Arquivo de configuração '{self.file_path}' não encontrado. Criando novo.")
+            self._log(
+                f"Arquivo de configuração '{self.file_path}' não encontrado. Criando novo."
+            )
             self._config_cache = {}
             return self._config_cache
 
@@ -34,7 +36,9 @@ class DailyPasswordManager:
                 self._config_cache = json.load(f)
                 return self._config_cache
         except json.JSONDecodeError:
-            self._log(f"Arquivo '{self.file_path}' está corrompido. Substituindo por um novo.")
+            self._log(
+                f"Arquivo '{self.file_path}' está corrompido. Substituindo por um novo."
+            )
             self._config_cache = {}
             return self._config_cache
         except Exception as e:
@@ -57,10 +61,7 @@ class DailyPasswordManager:
             self.password = dp.get("password")
         else:
             # Atualiza somente se necessário
-            config["daily_password"] = {
-                "date": self.today,
-                "password": None
-            }
+            config["daily_password"] = {"date": self.today, "password": None}
             self.password = None
             self._write_config()
 
@@ -70,10 +71,7 @@ class DailyPasswordManager:
     def set_today_password(self, password):
         config = self._read_config()
         self.password = password
-        config["daily_password"] = {
-            "date": self.today,
-            "password": password
-        }
+        config["daily_password"] = {"date": self.today, "password": password}
         self._write_config()
 
     def reset_daily_password(self):

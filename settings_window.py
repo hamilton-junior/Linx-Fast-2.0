@@ -1,182 +1,680 @@
+"""Settings window for Linx Fast built entirely with CustomTkinter widgets.
+
+Provides tabbed configuration sections with automatic size adjustments and
+log preview helpers that stay responsive to the current application state.
+"""
+
+import os
+from pathlib import Path
+from tkinter import filedialog, messagebox
+
 import customtkinter as ctk
-import logging
-from logger_config import auto_log_functions
 
-try:
-    from version import VERSION, BUILD_DATE
-except ImportError:
-    VERSION, BUILD_DATE = "dev", "dev"
-
-# Get the module logger
-logger = logging.getLogger(__name__)
+from logger_config import clear_logs, set_log_level, tail_log_file
+from settings_manager import DEFAULT_CONFIG, load_config, save_config
 
 
-@auto_log_functions
 class SettingsWindow(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
-        self._after_ids = set()  
-        self.title("Configurações")
-        # Não define geometry fixa!
         self.master = master
-        self.expandable_fields = set(master.expandable_fields)
-        self.check_vars = {}
+        self.title("Configurações - Linx Fast")
+        try:
+            self.transient(master)
+        except Exception:
+            pass
+        try:
+            self.grab_set()
+        except Exception:
+            pass
+        try:
+            self.protocol("WM_DELETE_WINDOW", self._close)
+        except Exception:
+            pass
 
-
-        # Aparência e tema
-        theme_frame = ctk.CTkFrame(self)
-        theme_frame.pack(fill="x", padx=20, pady=(15, 5))
-        ctk.CTkLabel(theme_frame, text="Aparência e Tema", font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="center", pady=(0, 5))
-
-        # Aparência (Switch)
-        self.appearance_var = ctk.StringVar(value=master.appearance_mode if master.appearance_mode in ("dark", "light") else "dark")
-        ctk.CTkLabel(theme_frame, text="Modo de Aparência:").pack(anchor="w")
-        self.appearance_switch = ctk.CTkSwitch(
-            theme_frame,
-            text="Modo Escuro",
-            variable=self.appearance_var,
-            onvalue="dark",
-            offvalue="light"
+        # config path and loading
+        self.config_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "config.json")
         )
-        self.appearance_switch.pack(anchor="w", pady=(0, 5))
-        # Atualiza o texto do switch conforme o valor
-        def update_switch_text():
-            self.appearance_switch.configure(text="Modo Escuro" if self.appearance_var.get() == "dark" else "Modo Claro")
-        self.appearance_var.trace_add("write", lambda *a: self._safe_after(0, update_switch_text))
-        self._safe_after(0, update_switch_text)
+        self.config = load_config(self.config_path)
 
-        # Temas disponíveis (padrão + arquivos .json em /themes)
-        self.theme_var = ctk.StringVar(value=master.theme_name)
-        ctk.CTkLabel(theme_frame, text="Tema de Cores:").pack(anchor="w")
-        import os
-        theme_dir = "themes"
-        os.makedirs(theme_dir, exist_ok=True)
-        themes = ["green", "blue", "dark-blue"]
-        for file in os.listdir(theme_dir):
-            if file.endswith(".json"):
-                themes.append(file[:-5])
-        themes = sorted(set(themes))
-        ctk.CTkOptionMenu(
-            theme_frame,
-            variable=self.theme_var,
-            values=themes
-        ).pack(anchor="w", pady=(0, 5))
+        # Get theme manager from master window
+        self.theme_manager = self.master.theme_manager
+        self.theme_manager.register_window(self)
 
-        # Expansão automática
-        frame = ctk.CTkFrame(self)
-        frame.pack(fill="both", expand=True, padx=20, pady=10)
-        ctk.CTkLabel(frame, text="Campos com Expansão Automática", font=ctk.CTkFont(size=13, weight="bold")).pack(pady=(5, 10))
+        self._resize_job = None
+        self._log_refresh_job = None
+        self._pending_geometry_capture = True
+        self._geometry_padding = (0, 0)
+        self._min_geometry = (400, 320)
+        self._last_log_snapshot = ""
 
-        for field in master.fixed_fields:
-            var = ctk.BooleanVar(value=field in self.expandable_fields)
-            chk = ctk.CTkCheckBox(frame, text=field, variable=var)
-            chk.pack(anchor="w", pady=2)
-            self.check_vars[field] = var
+        # UI: tabs
+        self.tabs = ctk.CTkTabview(self, command=self._on_tab_changed)
+        self.tabs.pack(fill="both", expand=True, padx=12, pady=6)
+        self._tab_order = ("Geral", "Aparência", "Logs", "Avançado")
+        for name in self._tab_order:
+            self.tabs.add(name)
+        self._build_general_tab()
+        self._build_appearance_tab()
+        self._build_logs_tab()
+        self._build_advanced_tab()
 
-        # --- Label de versão acima dos botões, com tooltip de data do build ---
-        # Calcula largura do texto da versão para ajustar o frame
-        import tkinter.font as tkFont
-        font = tkFont.Font(family="Arial", size=10, slant="italic")
-        text_width = font.measure(str(VERSION)) + 40  # 40px extra para padding e ícone de tooltip
+        self.after(0, self._initialize_geometry)
+        self._start_log_preview_updates()
 
-        version_frame = ctk.CTkFrame(self, fg_color="transparent", width=text_width)
-        version_frame.pack(fill="x", pady=(0, 2), padx=8)
-        label_version = ctk.CTkLabel(
-            version_frame,
-            text=f"{VERSION}",
-            font=ctk.CTkFont(size=10, slant="italic"),
-            text_color="#888888",
-            anchor="e",
-            justify="right",
-            width=text_width
-        )
-        label_version.pack(side="right", padx=(0, 10), anchor="se")
-        version_frame.update_idletasks()
-        # Ajusta largura mínima do frame para caber o texto
-        version_frame.configure(width=max(label_version.winfo_reqwidth() + 20, text_width))
-
-        # Tooltip customizado para mostrar a data do build
-        def show_tooltip(event=None):
-            if hasattr(label_version, "_tooltip") and label_version._tooltip is not None:
-                return
-            tooltip = ctk.CTkToplevel(label_version)
-            tooltip.overrideredirect(True)
-            tooltip.attributes("-topmost", True)
-            tooltip_label = ctk.CTkLabel(
-                tooltip,
-                text=f"Build: {BUILD_DATE}",
-                font=ctk.CTkFont(size=11),
-                text_color="#fff",
-                fg_color="#222",
-                padx=7, pady=3
-            )
-            tooltip_label.pack()
-            label_version.update_idletasks()
-            x = label_version.winfo_rootx() + label_version.winfo_width() + 7
-            y = label_version.winfo_rooty() - 3
-            tooltip.geometry(f"+{x}+{y}")
-            label_version._tooltip = tooltip
-
-        def hide_tooltip(event=None):
-            if hasattr(label_version, "_tooltip") and label_version._tooltip is not None:
-                try:
-                    label_version._tooltip.destroy()
-                except Exception:
-                    pass
-                label_version._tooltip = None
-
-        label_version.bind("<Enter>", show_tooltip)
-        label_version.bind("<Leave>", hide_tooltip)
-
-        btn_frame = ctk.CTkFrame(self)
-        btn_frame.pack(fill="x", pady=(10, 16), padx=8)  # padding extra para evitar corte
-
-        ctk.CTkButton(btn_frame, text="Salvar", fg_color="#7E57C2", command=self.save_and_close).pack(side="left", padx=10)
-        ctk.CTkButton(btn_frame, text="Cancelar", fg_color="#A94444", command=self.destroy).pack(side="right", padx=10)
-
-        # Ajusta o tamanho da janela para o conteúdo
+    def _initialize_geometry(self):
+        if self._pending_geometry_capture is False:
+            return
         self.update_idletasks()
-        # Define um tamanho mínimo confortável, mas deixa o resto automático
-        self.minsize(340, 260)
+        current_tab = self.tabs.get()
+        if not current_tab:
+            return
+        tab_frame = self.tabs.tab(current_tab)
+        if tab_frame is None:
+            return
+        tab_frame.update_idletasks()
+        tab_req_width = tab_frame.winfo_reqwidth()
+        tab_req_height = tab_frame.winfo_reqheight()
+        outer_width = max(self.winfo_width(), tab_req_width)
+        outer_height = max(self.winfo_height(), tab_req_height)
+        padding_w = max(40, outer_width - tab_req_width)
+        padding_h = max(80, outer_height - tab_req_height)
+        self._geometry_padding = (padding_w, padding_h)
+        self._min_geometry = (
+            max(self._min_geometry[0], outer_width),
+            max(self._min_geometry[1], outer_height),
+        )
+        self.minsize(*self._min_geometry)
+        self._pending_geometry_capture = False
+        self._resize_to_tab(current_tab, animate=False)
 
-    def save_and_close(self):
-        self.master.expandable_fields = [field for field, var in self.check_vars.items() if var.get()]
-        self.master.save_expandable_fields_config()
-        # Salva e aplica tema e aparência
-        theme = self.theme_var.get()
-        mode = self.appearance_var.get()
-        self.master.save_theme_config(theme, mode)
-        ctk.set_appearance_mode(mode)
-        # Ajuste: se for tema customizado, usa o caminho completo
-        import os
-        theme_path = os.path.join("themes", f"{theme}.json")
-        if theme in ("green", "blue", "dark-blue") or not os.path.exists(theme_path):
-            ctk.set_default_color_theme(theme)
+    def _on_tab_changed(self, tab_name):
+        if not tab_name:
+            tab_name = self.tabs.get()
+        self._resize_to_tab(tab_name)
+        if tab_name == "Logs":
+            self._cancel_job("_log_refresh_job")
+            self._refresh_log_preview(force=True)
+
+    def _resize_to_tab(self, tab_name=None, animate=True):
+        if self._pending_geometry_capture:
+            self._initialize_geometry()
+            return
+        if tab_name is None:
+            tab_name = self.tabs.get()
+        tab_frame = self.tabs.tab(tab_name)
+        if tab_frame is None:
+            return
+        tab_frame.update_idletasks()
+        self.update_idletasks()
+        req_width = max(tab_frame.winfo_reqwidth(), self.tabs.winfo_reqwidth())
+        req_height = max(tab_frame.winfo_reqheight(), self.tabs.winfo_reqheight())
+        pad_w, pad_h = self._geometry_padding
+        if pad_w == 0 and pad_h == 0:
+            pad_w, pad_h = 60, 80
+        target_width = max(req_width + pad_w, self._min_geometry[0])
+        target_height = max(req_height + pad_h, self._min_geometry[1])
+        self._min_geometry = (
+            max(self._min_geometry[0], target_width),
+            max(self._min_geometry[1], target_height),
+        )
+        self.minsize(*self._min_geometry)
+        if animate:
+            self._animate_resize(target_width, target_height)
         else:
-            ctk.set_default_color_theme(theme_path)
-        self.master.theme_manager.set_theme(theme)
-        self.master.theme_manager.set_appearance_mode(mode)
-        self.master.theme_name = theme
-        self.master.appearance_mode = mode
+            self.geometry(f"{target_width}x{target_height}")
 
-        # Reconstrói toda a interface principal, preservando o estado
-        self.master.reload_theme_and_interface()
-        self.destroy()
+    def _animate_resize(self, target_width, target_height):
+        self._cancel_job("_resize_job")
+        current_width = self.winfo_width()
+        current_height = self.winfo_height()
+        if (
+            abs(target_width - current_width) <= 2
+            and abs(target_height - current_height) <= 2
+        ):
+            self.geometry(f"{target_width}x{target_height}")
+            return
+        steps = 10
+        duration = 15
 
+        def step(index=1):
+            if index >= steps:
+                self.geometry(f"{target_width}x{target_height}")
+                self._resize_job = None
+                return
+            new_w = round(
+                current_width + (target_width - current_width) * index / steps
+            )
+            new_h = round(
+                current_height + (target_height - current_height) * index / steps
+            )
+            self.geometry(f"{new_w}x{new_h}")
+            self._resize_job = self.after(duration, lambda: step(index + 1))
 
-    def _safe_after(self, delay, callback):
-        after_id = self.after(delay, callback)
-        self._after_ids.add(after_id)
-        return after_id
+        step()
 
-    def _cancel_all_afters(self):
-        for after_id in list(self._after_ids):
+    def _start_log_preview_updates(self):
+        self._cancel_job("_log_refresh_job")
+        self._refresh_log_preview(force=True)
+
+    def _refresh_log_preview(self, force=False):
+        self._log_refresh_job = None
+        try:
+            lines = tail_log_file(200)
+        except Exception:
+            lines = []
+        new_content = "\n".join(lines).strip()
+        if force or new_content != self._last_log_snapshot:
+            self._last_log_snapshot = new_content
+            self.log_preview_text.configure(state="normal")
+            self.log_preview_text.delete("0.0", "end")
+            if new_content:
+                self.log_preview_text.insert("0.0", new_content)
+            self.log_preview_text.configure(state="disabled")
+        delay = 2000 if self.tabs.get() == "Logs" else 5000
+        if self.winfo_exists():
+            self._log_refresh_job = self.after(delay, self._refresh_log_preview)
+
+    def _cancel_job(self, attr_name):
+        job_id = getattr(self, attr_name, None)
+        if job_id is not None:
             try:
-                self.after_cancel(after_id)
+                self.after_cancel(job_id)
             except Exception:
                 pass
-            self._after_ids.discard(after_id)
+            setattr(self, attr_name, None)
 
-    def on_close(self):
-        self._cancel_all_afters()
-        self.destroy()
+    def _build_appearance_tab(self):
+        f = ctk.CTkFrame(self.tabs.tab("Aparência"))
+        f.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Theme selection
+        theme_frame = ctk.CTkFrame(f)
+        theme_frame.pack(fill="x", padx=10, pady=(5, 10))
+
+        ctk.CTkLabel(theme_frame, text="Tema", font=("", 12, "bold")).pack(
+            anchor="w", padx=6, pady=(5, 10)
+        )
+
+        # Theme selection
+        theme_select_frame = ctk.CTkFrame(theme_frame)
+        theme_select_frame.pack(fill="x", padx=6, pady=2)
+        ctk.CTkLabel(theme_select_frame, text="Tema atual:").pack(
+            side="left", padx=(0, 10)
+        )
+
+        # Get available themes (custom + CTkinter defaults)
+        theme_dir_path = getattr(self.theme_manager, "themes_dir", None)
+        if theme_dir_path is None:
+            theme_dir_path = Path("themes")
+        else:
+            theme_dir_path = Path(theme_dir_path)
+        custom_themes = (
+            [p.stem for p in theme_dir_path.glob("*.json")] if theme_dir_path.exists() else []
+        )
+        ctk_themes = ["green", "blue", "dark-blue"]
+        theme_files = ctk_themes + custom_themes
+        self.theme_var = ctk.StringVar(value=self.config.get("theme", "Linx"))
+        theme_combo = ctk.CTkComboBox(
+            theme_select_frame,
+            values=theme_files,
+            variable=self.theme_var,
+            command=self._on_theme_change,
+        )
+        theme_combo.pack(side="left", fill="x", expand=True)
+
+        # Appearance mode selection
+        appearance_frame = ctk.CTkFrame(f)
+        appearance_frame.pack(fill="x", padx=10, pady=10)
+
+        ctk.CTkLabel(
+            appearance_frame, text="Modo de Aparência", font=("", 12, "bold")
+        ).pack(anchor="w", padx=6, pady=(5, 10))
+
+        mode_select_frame = ctk.CTkFrame(appearance_frame)
+        mode_select_frame.pack(fill="x", padx=6, pady=2)
+        ctk.CTkLabel(mode_select_frame, text="Modo:").pack(side="left", padx=(0, 10))
+
+        self.appearance_var = ctk.StringVar(
+            value=self.config.get("appearance_mode", "dark")
+        )
+        mode_combo = ctk.CTkComboBox(
+            mode_select_frame,
+            values=["light", "dark"],
+            variable=self.appearance_var,
+            command=self._on_appearance_change,
+        )
+        mode_combo.pack(side="left", fill="x", expand=True)
+
+    def _build_general_tab(self):
+        f = ctk.CTkFrame(self.tabs.tab("Geral"))
+        f.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Folders
+        folder_frame = ctk.CTkFrame(f)
+        folder_frame.pack(fill="x", padx=6, pady=(5, 8))
+        ctk.CTkLabel(folder_frame, text="Pastas", font=("", 12, "bold")).pack(
+            anchor="w", padx=6
+        )
+
+        ctk.CTkLabel(folder_frame, text="Pasta de templates:").pack(
+            anchor="w", padx=6, pady=(6, 0)
+        )
+        self.templates_folder_var = ctk.StringVar(
+            value=self.config.get("templates_folder", "templates")
+        )
+        templates_row = ctk.CTkFrame(folder_frame)
+        templates_row.pack(fill="x", padx=6, pady=2)
+        self.templates_entry = ctk.CTkEntry(
+            templates_row, textvariable=self.templates_folder_var
+        )
+        self.templates_entry.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(
+            templates_row, text="...", width=32, command=self._choose_templates_folder
+        ).pack(side="left", padx=6)
+
+        ctk.CTkLabel(folder_frame, text="Pasta de exportação:").pack(
+            anchor="w", padx=6, pady=(6, 0)
+        )
+        self.export_folder_var = ctk.StringVar(
+            value=self.config.get("export_folder", "")
+        )
+        export_row = ctk.CTkFrame(folder_frame)
+        export_row.pack(fill="x", padx=6, pady=2)
+        self.export_entry = ctk.CTkEntry(
+            export_row, textvariable=self.export_folder_var
+        )
+        self.export_entry.pack(side="left", fill="x", expand=True)
+        ctk.CTkButton(
+            export_row, text="...", width=32, command=self._choose_export_folder
+        ).pack(side="left", padx=6)
+
+        # Toggles
+        toggles_frame = ctk.CTkFrame(f)
+        toggles_frame.pack(fill="x", padx=6, pady=(10, 6))
+        ctk.CTkLabel(toggles_frame, text="Opções", font=("", 12, "bold")).pack(
+            anchor="w", padx=6
+        )
+
+        self.notify_sound_var = ctk.BooleanVar(
+            value=self.config.get("notifications", {}).get("sound", True)
+        )
+        self.notify_visual_var = ctk.BooleanVar(
+            value=self.config.get("notifications", {}).get("visual", True)
+        )
+        self.animations_var = ctk.BooleanVar(value=self.config.get("animations", True))
+        self.autosave_enabled_var = ctk.BooleanVar(
+            value=self.config.get("autosave", {}).get("enabled", False)
+        )
+        self.autosave_timeout_var = ctk.IntVar(
+            value=self.config.get("autosave", {}).get("timeout", 60)
+        )
+        self.smart_search_var = ctk.BooleanVar(
+            value=self.config.get("smart_search", True)
+        )
+        self.enhanced_validation_var = ctk.BooleanVar(
+            value=self.config.get("enhanced_validation", True)
+        )
+
+        ctk.CTkCheckBox(
+            toggles_frame,
+            text="Notificações sonoras",
+            variable=self.notify_sound_var,
+            command=self._on_general_change,
+        ).pack(anchor="w", padx=6, pady=4)
+        ctk.CTkCheckBox(
+            toggles_frame,
+            text="Notificações visuais",
+            variable=self.notify_visual_var,
+            command=self._on_general_change,
+        ).pack(anchor="w", padx=6, pady=4)
+        ctk.CTkCheckBox(
+            toggles_frame,
+            text="Animações",
+            variable=self.animations_var,
+            command=self._on_general_change,
+        ).pack(anchor="w", padx=6, pady=4)
+        ctk.CTkCheckBox(
+            toggles_frame,
+            text="Busca inteligente de templates",
+            variable=self.smart_search_var,
+            command=self._on_general_change,
+        ).pack(anchor="w", padx=6, pady=4)
+        ctk.CTkCheckBox(
+            toggles_frame,
+            text="Feedback visual aprimorado",
+            variable=self.enhanced_validation_var,
+            command=self._on_general_change,
+        ).pack(anchor="w", padx=6, pady=4)
+
+        autosave_row = ctk.CTkFrame(toggles_frame)
+        autosave_row.pack(fill="x", padx=6, pady=6)
+        ctk.CTkCheckBox(
+            autosave_row,
+            text="Auto-save templates",
+            variable=self.autosave_enabled_var,
+            command=self._on_general_change,
+        ).pack(side="left")
+        ctk.CTkLabel(autosave_row, text=" Timeout (s):").pack(side="left", padx=(8, 4))
+        ctk.CTkEntry(
+            autosave_row, textvariable=self.autosave_timeout_var, width=80
+        ).pack(side="left")
+
+        # Save button
+        ctk.CTkButton(f, text="Salvar Geral", command=self._save_general).pack(
+            anchor="e", padx=8, pady=10
+        )
+
+    def _choose_templates_folder(self):
+        path = filedialog.askdirectory(
+            initialdir=os.getcwd(), title="Escolha a pasta de templates"
+        )
+        if path:
+            self.templates_folder_var.set(path)
+            self._on_general_change()
+
+    def _choose_export_folder(self):
+        path = filedialog.askdirectory(
+            initialdir=os.getcwd(), title="Escolha a pasta de exportação"
+        )
+        if path:
+            self.export_folder_var.set(path)
+            self._on_general_change()
+
+    def _on_general_change(self):
+        # Apply immediately to config dict and persist lightly
+        self.config["templates_folder"] = self.templates_folder_var.get()
+        self.config["export_folder"] = self.export_folder_var.get()
+        self.config.setdefault("notifications", {})["sound"] = bool(
+            self.notify_sound_var.get()
+        )
+        self.config.setdefault("notifications", {})["visual"] = bool(
+            self.notify_visual_var.get()
+        )
+        self.config["animations"] = bool(self.animations_var.get())
+        self.config.setdefault("autosave", {})["enabled"] = bool(
+            self.autosave_enabled_var.get()
+        )
+        try:
+            self.config.setdefault("autosave", {})["timeout"] = int(
+                self.autosave_timeout_var.get()
+            )
+        except Exception:
+            self.config.setdefault("autosave", {})["timeout"] = 60
+        self.config["smart_search"] = bool(self.smart_search_var.get())
+        self.config["enhanced_validation"] = bool(self.enhanced_validation_var.get())
+        try:
+            save_config(self.config, self.config_path)
+        except Exception:
+            pass
+
+    def _on_theme_change(self, value):
+        """Handle theme changes in real-time"""
+        self.config["theme"] = value
+        try:
+            self.theme_manager.set_theme(value)
+            save_config(self.config, self.config_path)
+            self.master.update_idletasks()  # Force immediate update
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao alterar tema: {e}")
+
+    def _on_appearance_change(self, value):
+        """Handle appearance mode changes in real-time"""
+        self.config["appearance_mode"] = value
+        try:
+            self.theme_manager.set_appearance_mode(value)
+            save_config(self.config, self.config_path)
+            self.master.update_idletasks()  # Force immediate update
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao alterar modo de aparência: {e}")
+
+    def _build_advanced_tab(self):
+        f = ctk.CTkFrame(self.tabs.tab("Avançado"))
+        f.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Log settings section
+        log_frame = ctk.CTkFrame(f)
+        log_frame.pack(fill="x", padx=10, pady=(5, 10))
+
+        ctk.CTkLabel(
+            log_frame, text="Configurações de Log", font=("", 12, "bold")
+        ).pack(anchor="w", padx=6, pady=(5, 10))
+
+        # Log level selection
+        log_level_frame = ctk.CTkFrame(log_frame)
+        log_level_frame.pack(fill="x", padx=6, pady=2)
+        ctk.CTkLabel(log_level_frame, text="Nível de Log:").pack(
+            side="left", padx=(0, 10)
+        )
+        self.log_level_var = ctk.StringVar(value=self.config.get("log_level", "INFO"))
+        log_level_combo = ctk.CTkComboBox(
+            log_level_frame,
+            values=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+            variable=self.log_level_var,
+            command=self._on_log_level_change,
+        )
+        log_level_combo.pack(side="left", fill="x", expand=True)
+
+        # Clear logs button
+        ctk.CTkButton(log_frame, text="Limpar Logs", command=self._clear_logs).pack(
+            fill="x", padx=6, pady=(10, 5)
+        )
+
+        # Config import/export/reset
+        cfg_frame = ctk.CTkFrame(f)
+        cfg_frame.pack(fill="x", padx=10, pady=(10, 4))
+        ctk.CTkLabel(
+            cfg_frame, text="Configuração (Import/Export/Reset)", font=("", 12, "bold")
+        ).pack(anchor="w", padx=6, pady=(4, 8))
+        btns = ctk.CTkFrame(cfg_frame)
+        btns.pack(fill="x", padx=6, pady=6)
+        ctk.CTkButton(
+            btns, text="Importar Config (JSON)", command=self._import_config
+        ).pack(side="left", padx=6)
+        ctk.CTkButton(
+            btns, text="Exportar Config (JSON)", command=self._export_config
+        ).pack(side="left", padx=6)
+        ctk.CTkButton(
+            btns,
+            text="Resetar para Padrão",
+            fg_color="#A94444",
+            hover_color="#912F2F",
+            command=self._reset_to_defaults,
+        ).pack(side="right", padx=6)
+
+    def _build_logs_tab(self):
+        f = ctk.CTkFrame(self.tabs.tab("Logs"))
+        f.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Recent logs preview (small)
+        preview_frame = ctk.CTkFrame(f)
+        preview_frame.pack(fill="both", expand=True, padx=6, pady=6)
+        ctk.CTkLabel(
+            preview_frame, text="Visualizar Logs Recentes", font=("", 12, "bold")
+        ).pack(anchor="w", padx=6, pady=(4, 8))
+        self.log_preview_text = ctk.CTkTextbox(preview_frame, height=200)
+        self.log_preview_text.pack(fill="both", expand=True, padx=6, pady=6)
+        # Fill with last lines
+        try:
+            lines = tail_log_file(200)
+        except Exception:
+            lines = []
+        initial_content = "\n".join(lines).strip()
+        if initial_content:
+            self.log_preview_text.insert("0.0", initial_content)
+        self.log_preview_text.configure(state="disabled")
+        self._last_log_snapshot = initial_content
+
+        actions = ctk.CTkFrame(f)
+        actions.pack(fill="x", padx=6, pady=6)
+        ctk.CTkButton(
+            actions, text="Abrir Log Viewer", command=self._open_log_viewer
+        ).pack(side="left", padx=6)
+        ctk.CTkButton(actions, text="Exportar Logs", command=self._export_logs).pack(
+            side="left", padx=6
+        )
+        ctk.CTkButton(
+            actions,
+            text="Limpar Logs",
+            fg_color="#A94444",
+            hover_color="#912F2F",
+            command=self._clear_logs,
+        ).pack(side="right", padx=6)
+
+    def _open_log_viewer(self):
+        try:
+            self.master.open_log_viewer()
+        except Exception:
+            pass
+
+    def _export_logs(self):
+        # Export the fast.log file to a chosen location
+        src = os.path.join(os.getcwd(), "log", "fast.log")
+        if not os.path.exists(src):
+            messagebox.showinfo("Exportar Logs", "Arquivo de log não encontrado.")
+            return
+        dest = filedialog.asksaveasfilename(
+            defaultextension=".log",
+            filetypes=[("Log files", "*.log"), ("All files", "*.*")],
+        )
+        if dest:
+            try:
+                with open(src, "rb") as rf, open(dest, "wb") as wf:
+                    wf.write(rf.read())
+                messagebox.showinfo("Exportar Logs", f"Logs exportados para: {dest}")
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro ao exportar logs: {e}")
+
+    def _on_log_level_change(self, value):
+        """Handle log level changes in real-time"""
+        self.config["log_level"] = value
+        try:
+            set_log_level(value)
+            save_config(self.config, self.config_path)
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao alterar nível de log: {e}")
+
+    def _clear_logs(self):
+        """Handle clear logs button click"""
+        if messagebox.askyesno(
+            "Limpar Logs", "Deseja limpar todos os arquivos de log?"
+        ):
+            try:
+                clear_logs()
+                messagebox.showinfo(
+                    "Sucesso", "Arquivos de log foram limpos com sucesso."
+                )
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro ao limpar logs: {e}")
+
+    def _save_all(self):
+        try:
+            save_config(self.config, self.config_path)
+        except Exception:
+            pass
+
+        try:
+            set_log_level(self.config.get("log_level", "INFO"))
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self.master, "draw_all_fields"):
+                self.master.draw_all_fields()
+        except Exception:
+            pass
+
+        messagebox.showinfo("Salvo", "Configurações salvas e aplicadas.")
+
+    def _save_general(self):
+        # Persist general settings already applied by _on_general_change
+        try:
+            save_config(self.config, self.config_path)
+            messagebox.showinfo("Salvo", "Configurações gerais salvas.")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao salvar configuração: {e}")
+
+    def _import_config(self):
+        path = filedialog.askopenfilename(
+            filetypes=[("JSON files", "*.json"), ("All files", "*")]
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                cfg = f.read()
+            import json
+
+            obj = json.loads(cfg)
+            # Merge and save
+            self.config.update(obj)
+            save_config(self.config, self.config_path)
+            messagebox.showinfo("Importado", "Configuração importada com sucesso.")
+            # Apply some settings immediately
+            if "theme" in obj:
+                try:
+                    self.theme_manager.set_theme(obj["theme"])
+                except Exception:
+                    pass
+            if "appearance_mode" in obj:
+                try:
+                    self.theme_manager.set_appearance_mode(obj["appearance_mode"])
+                except Exception:
+                    pass
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao importar configuração: {e}")
+
+    def _export_config(self):
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json", filetypes=[("JSON files", "*.json")]
+        )
+        if not path:
+            return
+        try:
+            import json
+
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, indent=4, ensure_ascii=False)
+            messagebox.showinfo("Exportado", f"Config exportada para: {path}")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao exportar configuração: {e}")
+
+    def _reset_to_defaults(self):
+        if not messagebox.askyesno("Resetar", "Restaurar configurações para o padrão?"):
+            return
+        try:
+            # Overwrite config with DEFAULT_CONFIG
+            self.config = DEFAULT_CONFIG.copy()
+            save_config(self.config, self.config_path)
+            messagebox.showinfo(
+                "Resetado",
+                "Configurações restauradas para o padrão. Reinicie o app se necessário.",
+            )
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao resetar configuração: {e}")
+
+    def _close(self):
+        self._cancel_job("_resize_job")
+        self._cancel_job("_log_refresh_job")
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        if hasattr(self, "theme_manager"):
+            try:
+                self.theme_manager.unregister_window(self)
+            except Exception:
+                pass
+        if hasattr(self.master, "_settings_window") and getattr(
+            self.master, "_settings_window"
+        ) is self:
+            self.master._settings_window = None
+        try:
+            super().destroy()
+        except Exception:
+            pass
+
+    def destroy(self):
+        """Ensure destroy always routes through cleanup logic."""
+        self._close()

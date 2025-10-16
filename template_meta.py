@@ -56,7 +56,10 @@ class TemplateMeta:
                 # Sempre mantém o nome padronizado
                 self.meta[canonical_name] = merged
                 to_remove.append(k)
-                if lowered[k_lower + "_orig"] in self.meta and lowered[k_lower + "_orig"] != canonical_name:
+                if (
+                    lowered[k_lower + "_orig"] in self.meta
+                    and lowered[k_lower + "_orig"] != canonical_name
+                ):
                     to_remove.append(lowered[k_lower + "_orig"])
             else:
                 lowered[k_lower] = v
@@ -99,13 +102,17 @@ class TemplateMeta:
     def _find_meta_key(self, name):
         # Garante unificação antes de buscar
         self._ensure_unified()
+
         # Busca insensível a capitalização, mas padroniza só o nome do template
         def normalize(n):
             if " / " in n:
                 pasta, nome = n.split(" / ", 1)
-                return f"{pasta} / {nome[:1].upper() + nome[1:] if nome else nome}".lower()
+                return (
+                    f"{pasta} / {nome[:1].upper() + nome[1:] if nome else nome}".lower()
+                )
             else:
                 return (n[:1].upper() + n[1:] if n else n).lower()
+
         name_norm = normalize(name)
         for k in self.meta:
             if normalize(k) == name_norm:
@@ -145,15 +152,11 @@ class TemplateMeta:
             is_geral = category == "Geral"
 
             return (
-                0 if is_fav and is_geral else
-                1 if is_fav else
-                2 if is_geral else
-                3,
-                name.lower()
+                0 if is_fav and is_geral else 1 if is_fav else 2 if is_geral else 3,
+                name.lower(),
             )
 
         return sorted(template_names, key=sort_key)
-
 
     def get_display_name(self, name):
         if self.is_favorite(name):

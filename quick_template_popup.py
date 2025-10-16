@@ -20,7 +20,9 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.manager = manager
         # Não instancia ThemeManager para alterar modo de aparência!
-        self.theme_manager = ThemeManager(theme_name=getattr(master, "theme_name", "green"))
+        self.theme_manager = ThemeManager(
+            theme_name=getattr(master, "theme_name", "green")
+        )
         self.geometry("325x250")
         self.entries = {}
         # Referência ao app principal para funções de UI
@@ -50,8 +52,11 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             if hasattr(self.master, "theme_name"):
                 theme = self.master.theme_name
                 import os
+
                 theme_path = os.path.join("themes", f"{theme}.json")
-                if theme in ("green", "blue", "dark-blue") or not os.path.exists(theme_path):
+                if theme in ("green", "blue", "dark-blue") or not os.path.exists(
+                    theme_path
+                ):
                     ctk.set_default_color_theme(theme)
                 else:
                     ctk.set_default_color_theme(theme_path)
@@ -61,15 +66,14 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             pass
 
         # Título
-        title = ctk.CTkLabel(self, text="Selecionar Template", font=("Arial", 14, "bold"))
+        title = ctk.CTkLabel(
+            self, text="Selecionar Template", font=("Arial", 14, "bold")
+        )
         title.grid(row=0, column=0, columnspan=3, pady=(5, 0), padx=10, sticky="ew")
 
         # Botão fixo à esquerda
         self.pin_button = ctk.CTkButton(
-            self,
-            text="📍",
-            width=36,
-            command=self.toggle_always_on_top
+            self, text="📍", width=36, command=self.toggle_always_on_top
         )
         self.pin_button.grid(row=1, column=0, padx=(10, 5), pady=5, sticky="w")
 
@@ -79,12 +83,13 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             self,
             text="",  # Sem texto, só o checkbox
             variable=self.clear_on_switch,
-            width=1
+            width=1,
         )
         self.clear_toggle.grid(row=1, column=2, padx=(10, 10), pady=5, sticky="e")
 
         # Tooltip customizado
         self.tooltip = None
+
         def show_tooltip(event=None):
             if self.tooltip is not None:
                 return
@@ -97,7 +102,8 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                 font=ctk.CTkFont(size=11),
                 text_color="#fff",
                 fg_color="#222",
-                padx=8, pady=4
+                padx=8,
+                pady=4,
             )
             label.pack()
             # Posição ao lado do ícone
@@ -117,7 +123,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             self,
             values=self.manager.get_template_names(),
             variable=self.template_var,
-            command=self.load_template
+            command=self.load_template,
         )
         self.template_dropdown.grid(row=1, column=1, padx=(0, 0), pady=5, sticky="ew")
 
@@ -157,7 +163,15 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         current = self.attributes("-topmost")
         new_state = not current
         self.attributes("-topmost", new_state)
-        self.pin_button.configure(fg_color="green" if new_state else self.theme_manager.get_theme_default_color(ctk.CTkButton, "fg_color"))
+        self.pin_button.configure(
+            fg_color=(
+                "green"
+                if new_state
+                else self.theme_manager.get_theme_default_color(
+                    ctk.CTkButton, "fg_color"
+                )
+            )
+        )
         self.pin_button.configure(text="📌" if new_state else "📍")
         if hasattr(self.app, "show_snackbar"):
             self.app.show_snackbar(
@@ -169,7 +183,9 @@ class QuickTemplatePopup(ctk.CTkToplevel):
     def load_template(self, template_name):
         """Carrega o template selecionado e configura os campos dinamicamente"""
         logger.info(f"Carregando template: {template_name}")
-        from main_window import placeholder_engine  # Importa aqui para evitar import circular
+        from main_window import (
+            placeholder_engine,
+        )  # Importa aqui para evitar import circular
         import json
         import os
 
@@ -193,6 +209,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
 
         # Filtra placeholders automáticos
         automatic_placeholders = set(placeholder_engine.handlers.keys())
+
         def is_automatic(ph):
             if ph in automatic_placeholders:
                 return True
@@ -205,14 +222,21 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         # --- ORDEM PERSISTENTE DOS CAMPOS DINÂMICOS ---
         # Tenta carregar ordem salva do config.json - INICIANDO
         fixed_fields = [
-            "Nome", "Problema Relatado", "CNPJ",
-            "Telefone", "Email", "Protocolo", "Procedimento Executado"
+            "Nome",
+            "Problema Relatado",
+            "CNPJ",
+            "Telefone",
+            "Email",
+            "Protocolo",
+            "Procedimento Executado",
         ]
         # Se quiser manter sincronizado com o app principal, pode importar de lá
 
         # Separa placeholders em fixos e dinâmicos
         fixed_present = [ph for ph in fixed_fields if ph in placeholders]
-        dynamic_fields = [ph for ph in placeholders if ph not in fixed_fields and not is_automatic(ph)]
+        dynamic_fields = [
+            ph for ph in placeholders if ph not in fixed_fields and not is_automatic(ph)
+        ]
 
         order = None
         config_path = "config.json"
@@ -226,7 +250,9 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                 order = None
         if order:
             # Garante que só mantenha campos realmente presentes no template
-            dynamic_ordered = [f for f in order if f in dynamic_fields] + [f for f in dynamic_fields if f not in order]
+            dynamic_ordered = [f for f in order if f in dynamic_fields] + [
+                f for f in dynamic_fields if f not in order
+            ]
         else:
             dynamic_ordered = dynamic_fields
 
@@ -234,6 +260,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         used_fields = fixed_present + dynamic_ordered
 
         import re
+
         def detect_field_type(name):
             field_type = "entry"
             field_label = name
@@ -263,15 +290,25 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                 self.entries[field] = entry
             elif field_type == "switch":
                 var = ctk.StringVar(value="Sim")
-                entry = ctk.CTkSwitch(self.form_frame, text="", variable=var, onvalue="Sim", offvalue="Não")
+                entry = ctk.CTkSwitch(
+                    self.form_frame,
+                    text="",
+                    variable=var,
+                    onvalue="Sim",
+                    offvalue="Não",
+                )
                 entry.grid(row=i, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
                 self.entries[field] = entry
             elif field_type == "radio" and radio_options:
                 var = ctk.StringVar(value=radio_options[0])
                 radio_frame = ctk.CTkFrame(self.form_frame, fg_color="transparent")
-                radio_frame.grid(row=i, column=0, sticky="e", padx=(100, 0), pady=(2, 2))
+                radio_frame.grid(
+                    row=i, column=0, sticky="e", padx=(100, 0), pady=(2, 2)
+                )
                 for opt in radio_options:
-                    btn = ctk.CTkRadioButton(radio_frame, text=opt, variable=var, value=opt)
+                    btn = ctk.CTkRadioButton(
+                        radio_frame, text=opt, variable=var, value=opt
+                    )
                     btn.pack(side="left", padx=2)
                 self.entries[field] = var
             elif field in ("Procedimento Executado", "Problema Relatado"):
@@ -290,7 +327,9 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                     val = current_widget.get()
                     current_border_color = current_widget.cget("border_color")
                     current_widget.grid_forget()
-                    textbox = ctk.CTkTextbox(self.form_frame, height=60, wrap="word", border_width=2)
+                    textbox = ctk.CTkTextbox(
+                        self.form_frame, height=60, wrap="word", border_width=2
+                    )
                     if val:
                         textbox.insert("1.0", val)
                     textbox.grid(
@@ -303,6 +342,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                         f"Cor da borda atualizada para {current_border_color} no campo {field_name}"
                     )
                     textbox.focus()
+
                     # TAB navega para o próximo campo (transforma em Entry antes de avançar)
                     def on_tab(e, fn=field_name):
                         to_entry(fn, row_idx)
@@ -328,13 +368,16 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                         return
                     val = current_widget.get("1.0", "end-1c")
                     current_widget.grid_forget()
-                    entry = ctk.CTkEntry(self.form_frame, placeholder_text=f"{field_label}")
+                    entry = ctk.CTkEntry(
+                        self.form_frame, placeholder_text=f"{field_label}"
+                    )
                     if val:
                         entry.insert(0, val)
                     entry.grid(
                         row=row_idx, column=0, sticky="e", padx=(10, 0), pady=(2, 2)
                     )
                     self.entries[field_name] = entry
+
                     # Intercepta TAB e Shift+TAB no Entry ANTES de expandir
                     def on_entry_tab(event, fn=field_name):
                         if event.keysym == "Tab":
@@ -537,7 +580,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             for widget in self.grid_slaves():
                 info = widget.grid_info()
                 if info.get("row") == 1 and info.get("column") in (0, 1):
-                    dropdown_height = max(dropdown_height, widget.winfo_reqheight())    
+                    dropdown_height = max(dropdown_height, widget.winfo_reqheight())
             # Margens e paddings
             padding = 15  # espaço para margens/paddings
             min_height = title_height + dropdown_height + copy_btn_height + padding
@@ -554,11 +597,13 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             max_height = int(screen_height * 0.9)
             min_height = 220
             final_height = max(min(desired_height, max_height), min_height)
-            self.geometry(f"400x{final_height}")                
+            self.geometry(f"400x{final_height}")
 
     def copy_template(self):
         """Processa o template com os valores dos campos e copia para o clipboard"""
-        from main_window import placeholder_engine  # Importa aqui para evitar import circular
+        from main_window import (
+            placeholder_engine,
+        )  # Importa aqui para evitar import circular
 
         logging.info("Copiando template processado para o clipboard...")
 
@@ -573,6 +618,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
 
         # 1. Coleta valores dos campos
         import customtkinter as ctk
+
         field_values = {}
         for key, entry in self.entries.items():
             if isinstance(entry, ctk.CTkCheckBox):
@@ -590,6 +636,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         # 2. Processa lógica condicional no template
         def process_conditionals(template, field_values):
             import re
+
             def cond_repl(match):
                 field = match.group(1)
                 true_val = match.group(2)
@@ -598,6 +645,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                 # Valores considerados como verdadeiro
                 val_lower = str(val).lower()
                 return true_val if val_lower in {"sim", "true", "1"} else false_val
+
             return re.sub(r"\$([^\$?]+)\?([^\|$]+)\|([^\$]+)\$", cond_repl, template)
 
         content = process_conditionals(content, field_values)
@@ -610,6 +658,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         content = placeholder_engine.process(content)
 
         import pyperclip
+
         pyperclip.copy(content)
         logging.debug("Template copiado com sucesso para o clipboard")
         self.app.show_snackbar(
@@ -649,6 +698,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
             content = content.replace(f"${key}$", value or "")
 
         import pyperclip
+
         pyperclip.copy(content)
         self.destroy()
 

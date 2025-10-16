@@ -1,4 +1,3 @@
-from typing import Self
 import customtkinter as ctk
 import pyperclip
 import json
@@ -8,14 +7,13 @@ import datetime
 import sys
 import logging
 import tkinter as tk
-import requests
 from template_editor import TemplateEditor
 from template_manager import TemplateManager
 from theme_manager import ThemeManager
 from dpm import DailyPasswordManager
 from settings_window import SettingsWindow
+from settings_manager import load_config
 from customtkinter import CTkInputDialog
-from nocodb_api import fetch_nocodb_templates
 from logger_config import auto_log_functions
 
 # Get the module logger
@@ -127,22 +125,30 @@ class TemplateApp(ctk.CTk):
         # Carrega config de campos expansíveis
         self.expandable_fields = self.load_expandable_fields_config()
 
-        # Carrega config de tema e aparência
-        self.theme_name, self.appearance_mode = self.load_theme_config()
-        ctk.set_appearance_mode(self.appearance_mode)
-        theme_path = os.path.join("themes", f"{self.theme_name}.json")
-        if self.theme_name in ("green", "blue", "dark-blue") or not os.path.exists(
-            theme_path
-        ):
-            ctk.set_default_color_theme(self.theme_name)
-        else:
-            ctk.set_default_color_theme(theme_path)
+        # Load persistent config (used for field definitions and other settings)
+        try:
+            self.config = load_config()
+        except Exception:
+            self.config = {}
 
-        # Inicialização das classes
-        self.template_manager = TemplateManager()
+        # Inicializar o ThemeManager primeiro (ele será usado por outras janelas)
+        self.theme_name = self.config.get("theme", "Linx")
+        self.appearance_mode = self.config.get("appearance_mode", "dark")
+
+        # Criar e configurar o ThemeManager global
         self.theme_manager = ThemeManager(
             theme_name=self.theme_name, mode=self.appearance_mode
         )
+        # Registrar a janela principal
+        self.theme_manager.register_window(self)
+
+        # Inicialização das outras classes
+        self.template_manager = TemplateManager()
+        # Load persistent config (used for field definitions and other settings)
+        try:
+            self.config = load_config()
+        except Exception:
+            self.config = {}
         self.password_manager = DailyPasswordManager()
         self.fixed_fields = [
             "Nome",
@@ -212,6 +218,16 @@ class TemplateApp(ctk.CTk):
             command=self.open_settings,
         )
         self.settings_button.pack(side="left", padx=(5, 0))
+
+        # Log viewer button
+        self.log_viewer_button = ctk.CTkButton(
+            selector_frame,
+            text="📜",
+            width=32,
+            anchor="center",
+            command=self.open_log_viewer,
+        )
+        self.log_viewer_button.pack(side="left", padx=(5, 0))
 
         self.form_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.form_frame.grid(row=1, column=0, sticky="nsew")
@@ -1174,6 +1190,261 @@ class TemplateApp(ctk.CTk):
             up_btn.pack(side="left", padx=2)
             down_btn.pack(side="left", padx=2)
             del_btn.pack(side="left", padx=2)
+
+        # Apply any field definition (mask/regex/default/required)
+        try:
+            widget = self.entries.get(name)
+            if widget is not None:
+                self._apply_field_definition(name, widget)
+        except Exception:
+            pass
+
+    def _apply_field_definition(self, name, widget):
+        """Apply runtime field definition (from config field_definitions) to a widget.
+
+        Supported keys in definition: mask (telefone, CNPJ, numeric), regex (string),
+        default, required (bool).
+        """
+        try:
+            if not hasattr(self, "config"):
+                return
+            defs = self.config.get("field_definitions", {}) or {}
+
+            # Normalize key: remove any leading [checkbox], [switch], [radio:...] blocks
+            key = re.sub(r"^\[[^\]]+\]", "", name).strip()
+
+            definition = defs.get(key) or defs.get(name)
+            if not definition:
+                return
+
+            mask = definition.get("mask")
+            regex = definition.get("regex")
+            default = definition.get("default")
+            required = definition.get("required", False)
+
+            # Avoid re-binding handlers multiple times on the same object
+            already = getattr(widget, "_field_def_applied", False)
+            if already:
+                return
+            try:
+                setattr(widget, "_field_def_applied", True)
+            except Exception:
+                pass
+
+            # Helper to get/set widget value
+            def _get_value(w):
+                try:
+                    if isinstance(w, ctk.CTkTextbox):
+                        return w.get("1.0", "end-1c").strip()
+                    # Tk variables (for radio) stored directly in entries
+                    if isinstance(w, (ctk.StringVar, tk.StringVar, tk.Variable)):
+                        return w.get().strip()
+                    # Checkboxes/switches may store a variable attribute
+                    if hasattr(w, "get") and not hasattr(w, "grid"):
+                        return w.get().strip()
+                    if hasattr(w, "get"):
+                        return w.get().strip()
+                except Exception:
+                    return ""
+                return ""
+
+            def _set_value(w, val):
+                try:
+                    if isinstance(w, ctk.CTkTextbox):
+                        w.delete("1.0", "end")
+                        w.insert("1.0", val)
+                        return
+                    if isinstance(w, (ctk.StringVar, tk.StringVar, tk.Variable)):
+                        w.set(val)
+                        return
+                    # For CTkEntry-like
+                    if hasattr(w, "delete") and hasattr(w, "insert"):
+                        w.delete(0, "end")
+                        w.insert(0, val)
+                        return
+                    # For checkboxes/switches try variable attribute
+                    var = getattr(w, "variable", None) or getattr(w, "_variable", None)
+                    if var is not None and hasattr(var, "set"):
+                        var.set(val)
+                        return
+                    # Fallback: try set/select
+                    try:
+                        if str(val).lower() in ("1", "true", "sim", "yes", "on"):
+                            if hasattr(w, "select"):
+                                w.select()
+                        else:
+                            if hasattr(w, "deselect"):
+                                w.deselect()
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+            # Apply default value if provided and field is empty
+            try:
+                if default is not None:
+                    cur = _get_value(widget)
+                    if not cur:
+                        _set_value(widget, str(default))
+            except Exception:
+                pass
+
+            # Regex validation on focusout
+            if regex:
+                try:
+                    pattern = re.compile(regex)
+
+                    def _validate_regex(event=None, w=widget, pat=pattern):
+                        val = _get_value(w)
+                        if not val:
+                            # Let required/empty logic handle empties
+                            return
+                        try:
+                            ok = bool(pat.fullmatch(val))
+                        except Exception:
+                            ok = False
+                        if not ok:
+                            try:
+                                w.configure(border_color=self.ERROR_COLOR)
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                # restore border according to template usage
+                                self._update_single_field_border(name, w)
+                            except Exception:
+                                pass
+
+                    # Bind focusout (works for Entry/Textbox); for variables we can skip
+                    if hasattr(widget, "bind"):
+                        widget.bind("<FocusOut>", _validate_regex)
+                except Exception:
+                    pass
+
+            # Required: ensure on focusout we validate presence
+            if required:
+                try:
+                    if hasattr(widget, "bind"):
+                        widget.bind(
+                            "<FocusOut>",
+                            lambda e, w=widget, fn=name: self._validate_field_and_update_color(
+                                w, fn
+                            ),
+                        )
+                except Exception:
+                    pass
+
+            # Masks / formatting on key release
+            if mask:
+                try:
+
+                    def _only_digits(s):
+                        return re.sub(r"\D", "", s or "")
+
+                    def _format_telefone(s):
+                        d = _only_digits(s)
+                        if len(d) <= 2:
+                            return d
+                        if len(d) <= 6:
+                            return f"({d[:2]}) {d[2:]}"
+                        if len(d) <= 10:
+                            return f"({d[:2]}) {d[2:6]}-{d[6:]}"
+                        # celular com 9 dígitos
+                        return f"({d[:2]}) {d[2:7]}-{d[7:11]}"
+
+                    def _format_cnpj(s):
+                        d = _only_digits(s)
+                        parts = []
+                        if len(d) >= 2:
+                            parts.append(d[:2])
+                        if len(d) >= 5:
+                            parts.append(d[2:5])
+                        if len(d) >= 8:
+                            parts.append(d[5:8])
+                        if len(d) >= 12:
+                            rest = d[8:12]
+                            end = d[12:14]
+                        else:
+                            rest = d[8:12]
+                            end = d[12:14]
+                        formatted = ""
+                        if len(d) <= 2:
+                            formatted = d
+                        elif len(d) <= 5:
+                            formatted = f"{d[:2]}.{d[2:]}"
+                        elif len(d) <= 8:
+                            formatted = f"{d[:2]}.{d[2:5]}.{d[5:8]}"
+                        elif len(d) <= 12:
+                            formatted = f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}"
+                        else:
+                            formatted = (
+                                f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:14]}"
+                            )
+                        return formatted
+
+                    def _format_numeric(s):
+                        return _only_digits(s)
+
+                    def _make_formatter(fmt_name):
+                        def _fmt(event=None, w=widget, name=fmt_name):
+                            try:
+                                if isinstance(w, ctk.CTkTextbox):
+                                    cur = w.get("1.0", "end-1c")
+                                    if fmt_name == "telefone":
+                                        out = _format_telefone(cur)
+                                    elif fmt_name == "CNPJ":
+                                        out = _format_cnpj(cur)
+                                    else:
+                                        out = _format_numeric(cur)
+                                    if out != cur:
+                                        w.delete("1.0", "end")
+                                        w.insert("1.0", out)
+                                else:
+                                    cur = w.get()
+                                    if fmt_name == "telefone":
+                                        out = _format_telefone(cur)
+                                    elif fmt_name == "CNPJ":
+                                        out = _format_cnpj(cur)
+                                    else:
+                                        out = _format_numeric(cur)
+                                    if out != cur:
+                                        # move cursor to end after replace
+                                        w.delete(0, "end")
+                                        w.insert(0, out)
+                            except Exception:
+                                pass
+
+                        return _fmt
+
+                    fmt = str(mask)
+                    formatter = _make_formatter(fmt)
+                    # expose formatter for testing and direct invocation
+                    try:
+                        setattr(widget, "_field_formatter", formatter)
+                    except Exception:
+                        pass
+                    if hasattr(widget, "bind"):
+                        widget.bind("<KeyRelease>", formatter)
+                        # Apply formatter once immediately so pre-filled values are normalized.
+                        try:
+                            formatter()
+                        except Exception:
+                            pass
+                        # Also schedule a follow-up run shortly after to catch
+                        # programmatic inserts that occur immediately after apply.
+                        try:
+                            if hasattr(widget, "after"):
+                                widget.after(50, formatter)
+                                widget.after(150, formatter)
+                                widget.after(300, formatter)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+        except Exception:
+            # do not propagate errors from optional enhancements
+            return
 
     def save_field_order(self):
         """Salva a ordem dos campos dinâmicos do template atual no arquivo config.json."""
@@ -3085,7 +3356,7 @@ class TemplateApp(ctk.CTk):
                         values=self.template_manager.get_display_names()
                     )
 
-                def manter_local():
+                def manter_local(idx=None):  # Keep parameter for consistency
                     self.show_snackbar("Template local mantido!", toast_type="info")
                     compare_win.destroy()
 
@@ -3550,7 +3821,7 @@ class TemplateApp(ctk.CTk):
         )
 
     # Mantém uma lista global de tooltips abertos para garantir que todos sejam fechados ao passar o mouse novamente
-    _all_tooltips = []
+    _all_tooltips: list[ctk.CTkToplevel] = []
 
     def create_tooltip(
         self, widget, text, fg_color="#222", text_color="#fff", immediate_hide=True
@@ -3819,15 +4090,40 @@ class TemplateApp(ctk.CTk):
                 self._settings_window = None  # Se a janela foi fechada manualmente
 
         self._settings_window = SettingsWindow(self)
+        try:
+            self._settings_window.focus()
+            self._settings_window.lift()
+        except Exception:
+            pass
 
-        # Quando a janela for fechada, remove a referência
-        def on_close_settings():
-            win = self._settings_window
-            self._settings_window = None
-            if win is not None:
-                win.destroy()
+        def _release_settings_ref(event=None):
+            if getattr(self, "_settings_window", None) is event.widget:
+                self._settings_window = None
 
-        self._settings_window.protocol("WM_DELETE_WINDOW", on_close_settings)
+        self._settings_window.bind("<Destroy>", _release_settings_ref)
+
+    def open_log_viewer(self):
+        from log_viewer import LogViewer
+
+        # Permite apenas uma janela de log viewer por vez
+        if hasattr(self, "_log_viewer") and self._log_viewer is not None:
+            try:
+                self._log_viewer.focus()
+                self._log_viewer.lift()
+                return
+            except Exception:
+                self._log_viewer = None  # Se a janela foi fechada manualmente
+
+        self._log_viewer = LogViewer(self)
+
+        # Registra a janela no theme manager
+        self.theme_manager.register_window(self._log_viewer)
+
+        try:
+            self._log_viewer.focus()
+            self._log_viewer.lift()
+        except Exception:
+            pass
 
     def reload_theme_and_interface(self):
         # 1. Salva o estado atual

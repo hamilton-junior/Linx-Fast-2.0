@@ -95,7 +95,9 @@ class TemplateManager:
                     category = rel_path.replace("\\", "/") if rel_path != "." else None
                     name = file[:-4]
                     full_name = f"{category} / {name}" if category else name
-                    self.templates[full_name] = self._read_template(os.path.join(root, file))
+                    self.templates[full_name] = self._read_template(
+                        os.path.join(root, file)
+                    )
 
         if not self.templates:
             self.add_template("Template Padrão", self.get_default_template())
@@ -108,9 +110,7 @@ class TemplateManager:
         # Suporta campos inteligentes: $[checkbox]Campo$, $[switch]Campo$, $[radio:op1|op2]Campo$
         # E também extrai corretamente campos usados em condicionais
         # Extrai todos os $...$ do template
-        all_matches = re.findall(
-            r"\$([^\$]+)\$", content
-        )
+        all_matches = re.findall(r"\$([^\$]+)\$", content)
         placeholders = set()
         for match in all_matches:
             # Se for condicional ($Campo?Texto|Alternativa$), pega só o nome do campo antes do ?

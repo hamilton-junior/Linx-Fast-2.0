@@ -1,7 +1,12 @@
 import logging
 import os
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 import types
+
+_BASE_DIR = Path(__file__).resolve().parent
+_LOG_DIR = _BASE_DIR / "log"
+_LOG_FILE = _LOG_DIR / "fast.log"
 
 
 def log_function_call(func):
@@ -47,6 +52,7 @@ def get_log_level():
     Aceita tanto nomes (info, warn, error, debug, etc) quanto números (10, 20, 30, ...).
     """
     env_level = os.getenv("LFASTLOGLEVEL", "INFO")
+
     # Tenta converter para inteiro
     try:
         level_num = int(env_level)
@@ -61,25 +67,68 @@ def get_log_level():
             return level_num
     except (ValueError, TypeError):
         pass
+
     # Tenta converter para nome
     env_level_name = str(env_level).strip().upper()
     if env_level_name == "WARN":
         env_level_name = "WARNING"
     if hasattr(logging, env_level_name):
         return getattr(logging, env_level_name)
-    print(
-        f"[DEBUG] LFASTLOGLEVEL={os.getenv('LFASTLOGLEVEL')}, log_level={env_level_name} ({logging.getLevelName(env_level_name)})"
-    )
 
+    print(f"[DEBUG] LFASTLOGLEVEL={env_level}, log_level={env_level_name}")
     return logging.INFO
+
+
+def get_log_file_path():
+    """Returns the path to the current log file."""
+    return str(_LOG_FILE)
+
+
+def get_log_file_size():
+    """Returns the current log file size in bytes."""
+    try:
+        return _LOG_FILE.stat().st_size
+    except Exception:
+        return 0
+
+
+def tail_log_file(n=10):
+    """Returns the last n lines of the log file."""
+    try:
+        with _LOG_FILE.open("r", encoding="utf-8") as f:
+            # Move to end of file and get file size
+            f.seek(0, 2)
+            size = f.tell()
+
+            # If file is empty, return empty list
+            if size == 0:
+                return []
+
+            # Initialize list for the last n lines
+            lines = []
+
+            # Read backwards until we have n lines or reach start of file
+            chars_back = 0
+            while len(lines) < n and chars_back < size:
+                # Move back 1024 chars or to start of file
+                chars_to_read = min(1024, size - chars_back)
+                f.seek(-(chars_to_read + chars_back), 2)
+                data = f.read(chars_to_read)
+
+                # Split into lines and add to list
+                lines = data.splitlines() + lines
+                chars_back += chars_to_read
+
+            # Return last n lines
+            return lines[-n:]
+    except Exception:
+        return []
 
 
 def setup_logging():
     """Configura o sistema de logging com níveis apropriados e formatação."""
     # Cria diretório de logs se não existir
-    log_dir = "log"
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, "fast.log")
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
 
     # Configura o formato do log
     formatter = logging.Formatter(
@@ -89,9 +138,11 @@ def setup_logging():
 
     # Obtém o nível de log da variável de ambiente
     log_level = get_log_level()
+    level_name = logging.getLevelName(log_level)
+
     # Loga o valor lido da variável de ambiente para depuração
     print(
-        f"[LOG VAR] LFASTLOGLEVEL={os.getenv('LFASTLOGLEVEL')}, log_level={log_level} ({logging.getLevelName(log_level)})"
+        f"[LOG VAR] LFASTLOGLEVEL={os.getenv('LFASTLOGLEVEL')}, log_level={log_level} ({level_name})"
     )
 
     # Remove handlers antigos para evitar logs duplicados
@@ -101,7 +152,10 @@ def setup_logging():
 
     # Handler para arquivo com rotação (mantém últimos 5 arquivos de 1MB cada)
     file_handler = RotatingFileHandler(
-        log_file, maxBytes=1024 * 1024, backupCount=5, encoding="utf-8"  # 1MB
+        get_log_file_path(),
+        maxBytes=1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",  # 1MB
     )
     file_handler.setFormatter(formatter)
     file_handler.setLevel(log_level)
@@ -117,5 +171,47 @@ def setup_logging():
     root_logger.addHandler(console_handler)
 
     logging.info(
-        f"Logging inicializado com o nível: {logging.getLevelName(log_level)} (from LFASTLOGLEVEL={os.getenv('LFASTLOGLEVEL')})"
+        f"Logging inicializado com o nível: {level_name} (from LFASTLOGLEVEL={os.getenv('LFASTLOGLEVEL')})"
     )
+
+
+def set_log_level(level):
+    """Seta o nível de log em tempo real para o logger root e todos os handlers.
+
+    Aceita tanto string ("DEBUG") quanto inteiro (10).
+    """
+    if isinstance(level, str):
+        level_name = level.strip().upper()
+        if level_name == "WARN":
+            level_name = "WARNING"
+        if hasattr(logging, level_name):
+            lvl = getattr(logging, level_name)
+        else:
+            try:
+                lvl = int(level)
+            except Exception:
+                return
+    else:
+        lvl = int(level)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(lvl)
+    for h in root_logger.handlers:
+        try:
+            h.setLevel(lvl)
+        except Exception:
+            pass
+
+    # Also update any existing named loggers' level to inherit correctly
+    logging.info(f"Nível de log atualizado para: {logging.getLevelName(lvl)}")
+
+
+def clear_logs():
+    """Clear all log files in the log directory."""
+    if _LOG_DIR.exists():
+        for file in _LOG_DIR.glob("fast.log*"):
+            try:
+                file.unlink()
+            except Exception as e:
+                logging.error(f"Erro ao limpar arquivo de log {file.name}: {e}")
+        logging.info("Arquivos de log limpos com sucesso")
