@@ -10,7 +10,7 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from logger_config import clear_logs, set_log_level, tail_log_file
+from logger_config import set_log_level
 from settings_manager import DEFAULT_CONFIG, load_config, save_config
 
 
@@ -43,25 +43,21 @@ class SettingsWindow(ctk.CTkToplevel):
         self.theme_manager.register_window(self)
 
         self._resize_job = None
-        self._log_refresh_job = None
         self._pending_geometry_capture = True
         self._geometry_padding = (0, 0)
         self._min_geometry = (400, 320)
-        self._last_log_snapshot = ""
 
         # UI: tabs
         self.tabs = ctk.CTkTabview(self, command=self._on_tab_changed)
         self.tabs.pack(fill="both", expand=True, padx=12, pady=6)
-        self._tab_order = ("Geral", "Aparência", "Logs", "Avançado")
+        self._tab_order = ("Geral", "Aparência", "Avançado")
         for name in self._tab_order:
             self.tabs.add(name)
         self._build_general_tab()
         self._build_appearance_tab()
-        self._build_logs_tab()
         self._build_advanced_tab()
 
         self.after(0, self._initialize_geometry)
-        self._start_log_preview_updates()
 
     def _initialize_geometry(self):
         if self._pending_geometry_capture is False:
@@ -93,9 +89,7 @@ class SettingsWindow(ctk.CTkToplevel):
         if not tab_name:
             tab_name = self.tabs.get()
         self._resize_to_tab(tab_name)
-        if tab_name == "Logs":
-            self._cancel_job("_log_refresh_job")
-            self._refresh_log_preview(force=True)
+        # Logs tab removed; nothing special to do on tab change.
 
     def _resize_to_tab(self, tab_name=None, animate=True):
         if self._pending_geometry_capture:
@@ -155,26 +149,12 @@ class SettingsWindow(ctk.CTkToplevel):
         step()
 
     def _start_log_preview_updates(self):
-        self._cancel_job("_log_refresh_job")
-        self._refresh_log_preview(force=True)
+        # Log preview functionality removed; keep method for compatibility.
+        return
 
     def _refresh_log_preview(self, force=False):
-        self._log_refresh_job = None
-        try:
-            lines = tail_log_file(200)
-        except Exception:
-            lines = []
-        new_content = "\n".join(lines).strip()
-        if force or new_content != self._last_log_snapshot:
-            self._last_log_snapshot = new_content
-            self.log_preview_text.configure(state="normal")
-            self.log_preview_text.delete("0.0", "end")
-            if new_content:
-                self.log_preview_text.insert("0.0", new_content)
-            self.log_preview_text.configure(state="disabled")
-        delay = 2000 if self.tabs.get() == "Logs" else 5000
-        if self.winfo_exists():
-            self._log_refresh_job = self.after(delay, self._refresh_log_preview)
+        # Removed: live log preview has been removed from settings.
+        return
 
     def _cancel_job(self, attr_name):
         job_id = getattr(self, attr_name, None)
@@ -456,10 +436,7 @@ class SettingsWindow(ctk.CTkToplevel):
         )
         log_level_combo.pack(side="left", fill="x", expand=True)
 
-        # Clear logs button
-        ctk.CTkButton(log_frame, text="Limpar Logs", command=self._clear_logs).pack(
-            fill="x", padx=6, pady=(10, 5)
-        )
+        # Log file manipulation removed from UI (kept configurable via config file)
 
         # Config import/export/reset
         cfg_frame = ctk.CTkFrame(f)
@@ -484,67 +461,17 @@ class SettingsWindow(ctk.CTkToplevel):
         ).pack(side="right", padx=6)
 
     def _build_logs_tab(self):
-        f = ctk.CTkFrame(self.tabs.tab("Logs"))
-        f.pack(fill="both", expand=True, padx=10, pady=10)
-
-        # Recent logs preview (small)
-        preview_frame = ctk.CTkFrame(f)
-        preview_frame.pack(fill="both", expand=True, padx=6, pady=6)
-        ctk.CTkLabel(
-            preview_frame, text="Visualizar Logs Recentes", font=("", 12, "bold")
-        ).pack(anchor="w", padx=6, pady=(4, 8))
-        self.log_preview_text = ctk.CTkTextbox(preview_frame, height=200)
-        self.log_preview_text.pack(fill="both", expand=True, padx=6, pady=6)
-        # Fill with last lines
-        try:
-            lines = tail_log_file(200)
-        except Exception:
-            lines = []
-        initial_content = "\n".join(lines).strip()
-        if initial_content:
-            self.log_preview_text.insert("0.0", initial_content)
-        self.log_preview_text.configure(state="disabled")
-        self._last_log_snapshot = initial_content
-
-        actions = ctk.CTkFrame(f)
-        actions.pack(fill="x", padx=6, pady=6)
-        ctk.CTkButton(
-            actions, text="Abrir Log Viewer", command=self._open_log_viewer
-        ).pack(side="left", padx=6)
-        ctk.CTkButton(actions, text="Exportar Logs", command=self._export_logs).pack(
-            side="left", padx=6
-        )
-        ctk.CTkButton(
-            actions,
-            text="Limpar Logs",
-            fg_color="#A94444",
-            hover_color="#912F2F",
-            command=self._clear_logs,
-        ).pack(side="right", padx=6)
+        # Logs tab removed. Log viewing/export/clearing is intentionally not
+        # available in the UI per project refactor decisions.
+        return
 
     def _open_log_viewer(self):
-        try:
-            self.master.open_log_viewer()
-        except Exception:
-            pass
+        # Removed: log viewer is no longer part of the UI.
+        raise RuntimeError("Log viewer has been removed from the application UI")
 
     def _export_logs(self):
-        # Export the fast.log file to a chosen location
-        src = os.path.join(os.getcwd(), "log", "fast.log")
-        if not os.path.exists(src):
-            messagebox.showinfo("Exportar Logs", "Arquivo de log não encontrado.")
-            return
-        dest = filedialog.asksaveasfilename(
-            defaultextension=".log",
-            filetypes=[("Log files", "*.log"), ("All files", "*.*")],
-        )
-        if dest:
-            try:
-                with open(src, "rb") as rf, open(dest, "wb") as wf:
-                    wf.write(rf.read())
-                messagebox.showinfo("Exportar Logs", f"Logs exportados para: {dest}")
-            except Exception as e:
-                messagebox.showerror("Erro", f"Erro ao exportar logs: {e}")
+        # Export removed from UI
+        raise RuntimeError("Exporting logs from the UI is disabled")
 
     def _on_log_level_change(self, value):
         """Handle log level changes in real-time"""
@@ -556,17 +483,8 @@ class SettingsWindow(ctk.CTkToplevel):
             messagebox.showerror("Erro", f"Erro ao alterar nível de log: {e}")
 
     def _clear_logs(self):
-        """Handle clear logs button click"""
-        if messagebox.askyesno(
-            "Limpar Logs", "Deseja limpar todos os arquivos de log?"
-        ):
-            try:
-                clear_logs()
-                messagebox.showinfo(
-                    "Sucesso", "Arquivos de log foram limpos com sucesso."
-                )
-            except Exception as e:
-                messagebox.showerror("Erro", f"Erro ao limpar logs: {e}")
+        # Clearing logs via UI removed. Keep method stub for compatibility.
+        raise RuntimeError("Clearing logs from the UI is disabled")
 
     def _save_all(self):
         try:
@@ -656,7 +574,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def _close(self):
         self._cancel_job("_resize_job")
-        self._cancel_job("_log_refresh_job")
+        # log preview job removed
         try:
             self.grab_release()
         except Exception:

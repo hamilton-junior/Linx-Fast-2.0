@@ -5,6 +5,7 @@ import os
 import re
 import datetime
 import sys
+import csv
 import logging
 import tkinter as tk
 from template_editor import TemplateEditor
@@ -48,29 +49,100 @@ class PlaceholderEngine:
 
     def process(self, text):
         def replacer(match):
-            ph = match.group(1)
-            # Handler customizado: $Agora[formato]$ ou $Agora$
-            if ph == "Agora":
-                # Formato padrão para $Agora$
+            content = match.group(1)
+
+            # Handle $Agora$ and $Agora[format]$
+            if content == "Agora":
                 fmt = "%H:%M"
                 try:
                     return datetime.datetime.now().strftime(fmt)
                 except Exception:
                     return match.group(0)
-            if ph.startswith("Agora[") and ph.endswith("]"):
-                fmt = ph[6:-1]
+            if content.startswith("Agora[") and content.endswith("]"):
+                fmt = content[6:-1]
                 try:
                     return datetime.datetime.now().strftime(fmt)
                 except Exception:
                     return match.group(0)
-            # Handler padrão
-            handler = self.handlers.get(ph)
+
+            # Support default value syntax: $Name|Default$
+            name = content
+            default = None
+            if "|" in content:
+                # Split only on the first '|' to allow '|' in defaults
+                name, default = content.split("|", 1)
+
+            # Trim whitespace
+            name = name.strip()
+            if default is not None:
+                default = default
+
+            # Support arguments syntax: Name(arg1,arg2)
+            args = []
+            base_name = name
+            if "(" in name and name.endswith(")"):
+                try:
+                    idx = name.index("(")
+                    base_name = name[:idx].strip()
+                    args_str = name[idx + 1 : -1]
+                    if args_str.strip() != "":
+                        # Parse arguments using csv.reader to allow quoted args with commas
+                        try:
+                            parsed = next(csv.reader([args_str], skipinitialspace=True))
+                        except Exception:
+                            parsed = [a.strip() for a in args_str.split(",")]
+
+                        # Convert numeric-looking args to int/float when possible, else keep as string
+                        def convert(v: str):
+                            v = v.strip()
+                            if v == "":
+                                return ""
+                            # Try int
+                            try:
+                                return int(v)
+                            except Exception:
+                                pass
+                            # Try float
+                            try:
+                                return float(v)
+                            except Exception:
+                                pass
+                            # Otherwise return string (without surrounding quotes if present)
+                            if (v.startswith('"') and v.endswith('"')) or (
+                                v.startswith("'") and v.endswith("'")
+                            ):
+                                return v[1:-1]
+                            return v
+
+                        args = [convert(a) for a in parsed]
+                except Exception:
+                    base_name = name
+
+            # Look up handler
+            handler = self.handlers.get(base_name)
             if handler:
-                return handler()
+                try:
+                    # Try calling with args; if handler doesn't accept them, fall back to no-arg call
+                    try:
+                        val = handler(*args)
+                    except TypeError:
+                        val = handler()
+                except Exception:
+                    val = None
+
+                if val is not None and val != "":
+                    return str(val)
+                if default is not None:
+                    return default
+                return match.group(0)
+
+            # No handler found: return default if provided, else leave placeholder intact
+            if default is not None:
+                return default
             return match.group(0)
 
-        # Regex: $Nome$ ou $Agora[...formato...]$ ou $Agora$
-        return re.sub(r"\$([a-zA-Z0-9 _\-çÇáéíóúãõâêîôûÀ-ÿ\[\]%:/]+)\$", replacer, text)
+        # Regex: capture everything between $...$ (restricted to avoid matching newlines)
+        return re.sub(r"\$([^\n\r$]+)\$", replacer, text)
 
 
 # Instância global da engine
@@ -218,16 +290,6 @@ class TemplateApp(ctk.CTk):
             command=self.open_settings,
         )
         self.settings_button.pack(side="left", padx=(5, 0))
-
-        # Log viewer button
-        self.log_viewer_button = ctk.CTkButton(
-            selector_frame,
-            text="📜",
-            width=32,
-            anchor="center",
-            command=self.open_log_viewer,
-        )
-        self.log_viewer_button.pack(side="left", padx=(5, 0))
 
         self.form_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.form_frame.grid(row=1, column=0, sticky="nsew")
@@ -1506,10 +1568,107 @@ class TemplateApp(ctk.CTk):
             text="Nome do novo campo (placeholder):", title="Adicionar Campo"
         )
         field_name = popup.get_input()
-        if field_name and field_name not in self.entries:
-            self.dynamic_fields.append(field_name)
-            self.draw_all_fields()
-            self.save_field_order()
+        if field_name:
+            name = self.add_dynamic_field_from_placeholder(field_name)
+            # If successfully added, ensure UI updates
+            if name and name not in self.entries:
+                try:
+                    self.draw_all_fields()
+                except Exception:
+                    pass
+
+    def _sanitize_field_name(self, raw: str) -> str:
+        """
+        Given a raw placeholder-like string, extract a clean field name.
+
+        Handles forms like:
+        - $[dropdown:Opt1|Opt2]Field$
+        - $Field(arg1,arg2)$
+        - Field?cond|alt
+        - $Name|Default$
+        Returns the cleaned field name (no args, brackets, defaults, or surrounding $).
+        """
+        if not raw:
+            return ""
+        s = raw.strip()
+        # Strip surrounding $ if present
+        if s.startswith("$") and s.endswith("$") and len(s) >= 2:
+            s = s[1:-1].strip()
+
+        # Remove top-level default (split on first '|' not inside brackets/paren)
+        depth_br = 0
+        depth_par = 0
+        split_idx = None
+        for i, ch in enumerate(s):
+            if ch == "[":
+                depth_br += 1
+            elif ch == "]":
+                if depth_br > 0:
+                    depth_br -= 1
+            elif ch == "(":
+                depth_par += 1
+            elif ch == ")":
+                if depth_par > 0:
+                    depth_par -= 1
+            elif ch == "|" and depth_br == 0 and depth_par == 0 and split_idx is None:
+                split_idx = i
+                break
+        if split_idx is not None:
+            s = s[:split_idx].strip()
+
+        # If conditional syntax with '?', take the part before '?'
+        if "?" in s:
+            s = s.split("?", 1)[0].strip()
+
+        # If starts with a bracketed prefix like [dropdown:..]Name, remove the bracketed part
+        if s.startswith("["):
+            try:
+                end = s.index("]")
+                s = s[end + 1 :].strip()
+            except ValueError:
+                # malformed, ignore
+                pass
+
+        # Remove any trailing args (first '(' at top level)
+        depth_br = 0
+        depth_par = 0
+        cut_idx = None
+        for i, ch in enumerate(s):
+            if ch == "[":
+                depth_br += 1
+            elif ch == "]":
+                if depth_br > 0:
+                    depth_br -= 1
+            elif ch == "(":
+                if depth_br == 0:
+                    cut_idx = i
+                    break
+        if cut_idx is not None:
+            s = s[:cut_idx].strip()
+
+        # Final cleanup: remove any remaining surrounding punctuation
+        return s.strip()
+
+    def add_dynamic_field_from_placeholder(self, raw: str):
+        """Add a dynamic field using a raw placeholder/string; sanitize name first.
+
+        Returns the sanitized name or empty string if none.
+        """
+        name = self._sanitize_field_name(raw)
+        if not name:
+            return ""
+        if name not in self.dynamic_fields:
+            self.dynamic_fields.append(name)
+            # Redraw fields and persist order
+            try:
+                self.draw_all_fields()
+            except Exception:
+                pass
+            try:
+                self.save_field_order()
+            except Exception:
+                pass
+        return name
 
     def limpar_campos(self):
         """Limpa todos os campos e restaura suas cores padrão."""
@@ -4103,27 +4262,8 @@ class TemplateApp(ctk.CTk):
         self._settings_window.bind("<Destroy>", _release_settings_ref)
 
     def open_log_viewer(self):
-        from log_viewer import LogViewer
-
-        # Permite apenas uma janela de log viewer por vez
-        if hasattr(self, "_log_viewer") and self._log_viewer is not None:
-            try:
-                self._log_viewer.focus()
-                self._log_viewer.lift()
-                return
-            except Exception:
-                self._log_viewer = None  # Se a janela foi fechada manualmente
-
-        self._log_viewer = LogViewer(self)
-
-        # Registra a janela no theme manager
-        self.theme_manager.register_window(self._log_viewer)
-
-        try:
-            self._log_viewer.focus()
-            self._log_viewer.lift()
-        except Exception:
-            pass
+        # Log viewer removed from application UI.
+        raise RuntimeError("Log viewer has been removed from the application UI")
 
     def reload_theme_and_interface(self):
         # 1. Salva o estado atual

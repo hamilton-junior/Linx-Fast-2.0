@@ -79,52 +79,6 @@ def get_log_level():
     return logging.INFO
 
 
-def get_log_file_path():
-    """Returns the path to the current log file."""
-    return str(_LOG_FILE)
-
-
-def get_log_file_size():
-    """Returns the current log file size in bytes."""
-    try:
-        return _LOG_FILE.stat().st_size
-    except Exception:
-        return 0
-
-
-def tail_log_file(n=10):
-    """Returns the last n lines of the log file."""
-    try:
-        with _LOG_FILE.open("r", encoding="utf-8") as f:
-            # Move to end of file and get file size
-            f.seek(0, 2)
-            size = f.tell()
-
-            # If file is empty, return empty list
-            if size == 0:
-                return []
-
-            # Initialize list for the last n lines
-            lines = []
-
-            # Read backwards until we have n lines or reach start of file
-            chars_back = 0
-            while len(lines) < n and chars_back < size:
-                # Move back 1024 chars or to start of file
-                chars_to_read = min(1024, size - chars_back)
-                f.seek(-(chars_to_read + chars_back), 2)
-                data = f.read(chars_to_read)
-
-                # Split into lines and add to list
-                lines = data.splitlines() + lines
-                chars_back += chars_to_read
-
-            # Return last n lines
-            return lines[-n:]
-    except Exception:
-        return []
-
-
 def setup_logging():
     """Configura o sistema de logging com níveis apropriados e formatação."""
     # Cria diretório de logs se não existir
@@ -152,7 +106,7 @@ def setup_logging():
 
     # Handler para arquivo com rotação (mantém últimos 5 arquivos de 1MB cada)
     file_handler = RotatingFileHandler(
-        get_log_file_path(),
+        str(_LOG_FILE),
         maxBytes=1024 * 1024,
         backupCount=5,
         encoding="utf-8",  # 1MB
@@ -207,7 +161,12 @@ def set_log_level(level):
 
 
 def clear_logs():
-    """Clear all log files in the log directory."""
+    """Clear all log files in the log directory.
+
+    Note: clearing logs from the UI was removed; this helper remains for
+    programmatic use. If you prefer to remove it entirely, I can delete it
+    as well — currently it's safe to keep since it's defined here only.
+    """
     if _LOG_DIR.exists():
         for file in _LOG_DIR.glob("fast.log*"):
             try:

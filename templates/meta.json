@@ -4,11 +4,6 @@
     "protegido": false,
     "nocodb_id": "2"
   },
-  "Suporte / Encerramento - Chamado Sem Interação": {
-    "favorito": true,
-    "protegido": false,
-    "nocodb_id": "3"
-  },
   "Suporte / Abertura de Chamado": {
     "nocodb_id": "1",
     "favorito": true,
@@ -22,7 +17,9 @@
   "Dev / Exemplo de Condicionais": {
     "nocodb_id": "72"
   },
-  "Template Exemplo buscado da API": {
-    "nocodb_id": "68"
+  "Dev / Template Exemplo buscado da API": {
+    "favorito": true,
+    "protegido": false,
+    "nocodb_id": "3"
   }
 }

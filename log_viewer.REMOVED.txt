@@ -1,0 +1,8 @@
+Log viewer removed on 2025-10-29 by automated refactor.
+
+The original `log_viewer.py` functionality was removed and the UI no longer
+exposes log viewing/export/clear operations. The original code was replaced
+with a stub and later intended for deletion; this file is a backup record.
+
+If you want the actual Python file deleted from the repository, please run
+`git rm log_viewer.py` locally or let me attempt again to remove it.
