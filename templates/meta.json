@@ -14,12 +14,17 @@
     "favorito": true,
     "protegido": false
   },
-  "Dev / Exemplo de Condicionais": {
-    "nocodb_id": "72"
-  },
-  "Dev / Template Exemplo buscado da API": {
+  "Suporte / Encerramento - Chamado sem Interação": {
+    "nocodb_id": "3",
     "favorito": true,
+    "protegido": false
+  },
+  "Exemplo de Condicionais": {
+    "nocodb_id": "72",
     "protegido": false,
-    "nocodb_id": "3"
+    "favorito": true
+  },
+  "Template Exemplo buscado da API": {
+    "nocodb_id": "68"
   }
 }

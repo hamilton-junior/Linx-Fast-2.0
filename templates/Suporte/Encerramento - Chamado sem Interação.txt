@@ -1,0 +1,4 @@
+$Nome$,
+Devido a falta de interação, o atendimento #$Protocolo$ será finalizado. Caso ainda possua alguma dúvida, sinta-se a vontade para entrar em contato novamente! ^^
+
+O atendimento poderá ser reaberto dentro do prazo de 5 dias úteis. Após esta data, favor acionar a central de atendimento no site https://suportelinx.my.site.com/PortalCliente/s/login/ ou pelo canal corporativo para abertura de um novo protocolo.

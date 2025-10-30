@@ -291,6 +291,28 @@ class TemplateApp(ctk.CTk):
         )
         self.settings_button.pack(side="left", padx=(5, 0))
 
+        # Favorite and Protected quick toggles for templates (Editor de Chamados)
+        try:
+            self.favorite_button = ctk.CTkButton(
+                selector_frame,
+                text="⭐",
+                width=32,
+                anchor="center",
+                command=self.toggle_current_template_favorite,
+            )
+            self.favorite_button.pack(side="left", padx=(5, 0))
+
+            self.protect_button = ctk.CTkButton(
+                selector_frame,
+                text="🔒",
+                width=32,
+                anchor="center",
+                command=self.toggle_current_template_protected,
+            )
+            self.protect_button.pack(side="left", padx=(5, 0))
+        except Exception:
+            pass
+
         self.form_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.form_frame.grid(row=1, column=0, sticky="nsew")
         self.form_frame.grid_columnconfigure(0, weight=1)
@@ -2063,6 +2085,46 @@ class TemplateApp(ctk.CTk):
         )
         self.load_template_placeholders()
         self._update_field_borders()
+
+    def toggle_current_template_favorite(self):
+        """Toggle favorite flag for the currently selected template and refresh selector."""
+        try:
+            display = self.current_template_display.get()
+            real = self.template_manager.meta.get_real_name(display)
+            if not real:
+                return
+            self.template_manager.meta.toggle_favorite(real)
+            # refresh selector values and keep current selection
+            vals = self.template_manager.get_display_names()
+            try:
+                self.template_selector.configure(values=vals)
+            except Exception:
+                pass
+            self.current_template_display.set(
+                self.template_manager.meta.get_display_name(real)
+            )
+        except Exception:
+            pass
+
+    def toggle_current_template_protected(self):
+        """Toggle protected flag for the currently selected template and refresh selector."""
+        try:
+            display = self.current_template_display.get()
+            real = self.template_manager.meta.get_real_name(display)
+            if not real:
+                return
+            # If favorite, the meta will not allow toggling protected (handled in TemplateMeta)
+            self.template_manager.meta.toggle_protected(real)
+            vals = self.template_manager.get_display_names()
+            try:
+                self.template_selector.configure(values=vals)
+            except Exception:
+                pass
+            self.current_template_display.set(
+                self.template_manager.meta.get_display_name(real)
+            )
+        except Exception:
+            pass
 
     def adjust_window_height(self):
         self.update_idletasks()
