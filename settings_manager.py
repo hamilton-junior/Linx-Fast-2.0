@@ -25,7 +25,11 @@ DEFAULT_CONFIG = {
 
 
 def _deep_merge_dict(defaults, user_cfg):
+    """Mescla recursivamente defaults e configurações do usuário."""
     merged = deepcopy(defaults)
+
+    if not isinstance(user_cfg, dict):
+        return merged
 
     for key, user_value in user_cfg.items():
         default_value = merged.get(key)
@@ -42,6 +46,9 @@ def load_config(path="config.json"):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
+            if not isinstance(cfg, dict):
+                logger.warning(f"Config em {path} não é um objeto JSON; usando defaults")
+                return deepcopy(DEFAULT_CONFIG)
             # Merge defaults
             return _deep_merge_dict(DEFAULT_CONFIG, cfg)
         except Exception as e:
