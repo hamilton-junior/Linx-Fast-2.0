@@ -7,6 +7,28 @@ import types
 _BASE_DIR = Path(__file__).resolve().parent
 _LOG_DIR = _BASE_DIR / "log"
 _LOG_FILE = _LOG_DIR / "fast.log"
+_LOGGER = logging.getLogger(__name__)
+
+
+def _is_valid_log_level(value):
+    """Valida se o valor pode ser convertido para um nível de log suportado."""
+    try:
+        level_num = int(value)
+        return level_num in (
+            logging.CRITICAL,
+            logging.ERROR,
+            logging.WARNING,
+            logging.INFO,
+            logging.DEBUG,
+            logging.NOTSET,
+        )
+    except (ValueError, TypeError):
+        pass
+
+    level_name = str(value).strip().upper()
+    if level_name == "WARN":
+        level_name = "WARNING"
+    return hasattr(logging, level_name)
 
 
 def log_function_call(func):
@@ -56,14 +78,7 @@ def get_log_level():
     # Tenta converter para inteiro
     try:
         level_num = int(env_level)
-        if level_num in (
-            logging.CRITICAL,
-            logging.ERROR,
-            logging.WARNING,
-            logging.INFO,
-            logging.DEBUG,
-            logging.NOTSET,
-        ):
+        if _is_valid_log_level(level_num):
             return level_num
     except (ValueError, TypeError):
         pass
@@ -75,7 +90,11 @@ def get_log_level():
     if hasattr(logging, env_level_name):
         return getattr(logging, env_level_name)
 
-    print(f"[DEBUG] LFASTLOGLEVEL={env_level}, log_level={env_level_name}")
+    _LOGGER.debug(
+        "LFASTLOGLEVEL inválido '%s'. Usando fallback INFO (normalizado: %s)",
+        env_level,
+        env_level_name,
+    )
     return logging.INFO
 
 
@@ -139,11 +158,8 @@ def setup_logging():
     # Obtém o nível de log da variável de ambiente
     log_level = get_log_level()
     level_name = logging.getLevelName(log_level)
-
-    # Loga o valor lido da variável de ambiente para depuração
-    print(
-        f"[LOG VAR] LFASTLOGLEVEL={os.getenv('LFASTLOGLEVEL')}, log_level={log_level} ({level_name})"
-    )
+    env_level = os.getenv("LFASTLOGLEVEL")
+    invalid_env_level = not _is_valid_log_level(env_level)
 
     # Remove handlers antigos para evitar logs duplicados
     root_logger = logging.getLogger()
@@ -170,9 +186,22 @@ def setup_logging():
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
 
-    logging.info(
-        f"Logging inicializado com o nível: {level_name} (from LFASTLOGLEVEL={os.getenv('LFASTLOGLEVEL')})"
+    _LOGGER.info(
+        "Logging inicializado com o nível: %s (from LFASTLOGLEVEL=%s)",
+        level_name,
+        env_level,
     )
+    _LOGGER.debug(
+        "[LOG VAR] LFASTLOGLEVEL=%s, log_level=%s (%s)",
+        env_level,
+        log_level,
+        level_name,
+    )
+    if invalid_env_level:
+        _LOGGER.debug(
+            "LFASTLOGLEVEL inválido '%s'. Fallback INFO aplicado durante bootstrap.",
+            env_level,
+        )
 
 
 def set_log_level(level):
