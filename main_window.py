@@ -132,7 +132,7 @@ class TemplateApp(ctk.CTk):
             self.config = {}
 
         # Inicializar o ThemeManager primeiro (ele será usado por outras janelas)
-        self.theme_name = self.config.get("theme", "Linx")
+        self.theme_name = self.config.get("theme_name", "green")
         self.appearance_mode = self.config.get("appearance_mode", "dark")
 
         # Criar e configurar o ThemeManager global
