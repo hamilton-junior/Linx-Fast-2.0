@@ -7,18 +7,45 @@ def ctk_message(parent, title: str, message: str, kind: str = "info"):
     dlg.title(title)
     dlg.transient(parent)
     dlg.grab_set()
+    # register with theme manager if parent exposes one so theme changes propagate
+    try:
+        if parent and hasattr(parent, "theme_manager"):
+            try:
+                parent.theme_manager.register_window(dlg)
+            except Exception:
+                pass
+    except Exception:
+        pass
     frm = ctk.CTkFrame(dlg)
     frm.pack(padx=12, pady=12, fill="both", expand=True)
     txt = ctk.CTkLabel(frm, text=message, anchor="center", justify="center", wraplength=420)
     txt.pack(fill="both", expand=True, pady=(0, 12))
     btn = ctk.CTkButton(frm, text="OK", width=80, command=dlg.destroy)
     try:
-        if kind == "error":
-            btn.configure(fg_color="#D32F2F")
-        elif kind == "warning":
-            btn.configure(fg_color="#D4A326")
-        elif kind == "success":
-            btn.configure(fg_color="#388E3C")
+        # Prefer theme-managed button colours when available; fall back to
+        # semantic hard-coded colours only if ThemeManager is not present.
+        color = None
+        try:
+            if parent and hasattr(parent, "theme_manager"):
+                color = parent.theme_manager.get_theme_default_color(
+                    ctk.CTkButton, "fg_color"
+                )
+        except Exception:
+            color = None
+
+        if not color:
+            if kind == "error":
+                color = "#D32F2F"
+            elif kind == "warning":
+                color = "#C08A00"
+            elif kind == "success":
+                color = "#388E3C"
+
+        if color:
+            try:
+                btn.configure(fg_color=color)
+            except Exception:
+                pass
     except Exception:
         pass
     btn.pack()
@@ -35,6 +62,14 @@ def ctk_ask_yes_no(parent, title: str, message: str) -> bool:
     dlg.title(title)
     dlg.transient(parent)
     dlg.grab_set()
+    try:
+        if parent and hasattr(parent, "theme_manager"):
+            try:
+                parent.theme_manager.register_window(dlg)
+            except Exception:
+                pass
+    except Exception:
+        pass
     frm = ctk.CTkFrame(dlg)
     frm.pack(padx=12, pady=12, fill="both", expand=True)
     ctk.CTkLabel(frm, text=message, wraplength=420, anchor="center", justify="center").pack(
@@ -52,10 +87,32 @@ def ctk_ask_yes_no(parent, title: str, message: str) -> bool:
 
     btns = ctk.CTkFrame(frm)
     btns.pack(pady=6)
-    ctk.CTkButton(btns, text="Confirmar", fg_color="#388E3C", command=on_yes).pack(
+    # Use theme defaults when the parent exposes a ThemeManager; otherwise
+    # fall back to the previous semantic colours for confirm/cancel.
+    try:
+        success_color = None
+        cancel_color = None
+        if parent and hasattr(parent, "theme_manager"):
+            try:
+                success_color = parent.theme_manager.get_theme_default_color(
+                    ctk.CTkButton, "fg_color"
+                )
+                cancel_color = success_color
+            except Exception:
+                success_color = None
+                cancel_color = None
+        if not success_color:
+            success_color = "#388E3C"
+        if not cancel_color:
+            cancel_color = "#A94444"
+    except Exception:
+        success_color = "#388E3C"
+        cancel_color = "#A94444"
+
+    ctk.CTkButton(btns, text="Confirmar", fg_color=success_color, command=on_yes).pack(
         side="left", padx=6
     )
-    ctk.CTkButton(btns, text="Cancelar", fg_color="#A94444", command=on_no).pack(
+    ctk.CTkButton(btns, text="Cancelar", fg_color=cancel_color, command=on_no).pack(
         side="left", padx=6
     )
     dlg.update_idletasks()
@@ -74,6 +131,14 @@ def ctk_ask_string(
     dlg.title(title)
     dlg.transient(parent)
     dlg.grab_set()
+    try:
+        if parent and hasattr(parent, "theme_manager"):
+            try:
+                parent.theme_manager.register_window(dlg)
+            except Exception:
+                pass
+    except Exception:
+        pass
     frm = ctk.CTkFrame(dlg)
     frm.pack(padx=12, pady=12, fill="both", expand=True)
     ctk.CTkLabel(frm, text=prompt, anchor="center", justify="center").pack(fill="x", pady=(0, 6))

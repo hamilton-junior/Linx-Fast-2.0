@@ -46,24 +46,11 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self.grid_columnconfigure(1, weight=1)  # coluna do dropdown expansível
         self.grid_columnconfigure(2, weight=0)  # coluna do toggle
 
-        # Garante que o tema e o modo de aparência do popup sejam iguais ao do app principal
-        try:
-            # Aplica o tema de cores (isso é seguro, pois só afeta o tema de cor, não o modo claro/escuro)
-            if hasattr(self.master, "theme_name"):
-                theme = self.master.theme_name
-                import os
-
-                theme_path = os.path.join("themes", f"{theme}.json")
-                if theme in ("green", "blue", "dark-blue") or not os.path.exists(
-                    theme_path
-                ):
-                    ctk.set_default_color_theme(theme)
-                else:
-                    ctk.set_default_color_theme(theme_path)
-            # NÃO ALTERA O MODO DE APARÊNCIA GLOBAL!
-            # O popup herda o modo de aparência do app principal automaticamente.
-        except Exception:
-            pass
+        # The global theme and appearance are managed by ThemeManager (in the
+        # main app). Do not call ctk.set_default_color_theme here because that
+        # changes global state and can lead to repeated theme application loops.
+        # The popup will inherit the active CTk appearance mode and theme from
+        # the application if it has been registered with ThemeManager.
 
         # Título
         title = ctk.CTkLabel(
@@ -93,15 +80,54 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         def show_tooltip(event=None):
             if self.tooltip is not None:
                 return
-            self.tooltip = ctk.CTkToplevel(self)
+            parent_creator = getattr(
+                getattr(self, "master", None), "_create_toplevel", None
+            )
+            if callable(parent_creator):
+                self.tooltip = parent_creator(self)
+            else:
+                self.tooltip = ctk.CTkToplevel(self)
+                try:
+                    if hasattr(self, "theme_manager") and self.theme_manager:
+                        try:
+                            self.theme_manager.register_window(self.tooltip)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
             self.tooltip.overrideredirect(True)
             self.tooltip.attributes("-topmost", True)
+            # Use theme-managed colours when possible; fall back to the
+            # previous hard-coded tooltip colours otherwise.
+            text_color = None
+            bg_color = None
+            try:
+                if hasattr(self, "theme_manager") and self.theme_manager:
+                    try:
+                        text_color = self.theme_manager.get_theme_default_color(
+                            ctk.CTkLabel, "text_color"
+                        )
+                        bg_color = self.theme_manager.get_theme_default_color(
+                            ctk.CTkFrame, "fg_color"
+                        )
+                    except Exception:
+                        text_color = None
+                        bg_color = None
+            except Exception:
+                text_color = None
+                bg_color = None
+
+            if not text_color:
+                text_color = "#fff"
+            if not bg_color:
+                bg_color = "#222"
+
             label = ctk.CTkLabel(
                 self.tooltip,
                 text="Limpar valores ao trocar de template?",
                 font=ctk.CTkFont(size=11),
-                text_color="#fff",
-                fg_color="#222",
+                text_color=text_color,
+                fg_color=bg_color,
                 padx=8,
                 pady=4,
             )
@@ -135,10 +161,25 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self.form_frame.grid_columnconfigure(0, weight=1)
 
         # Botão copiar (centralizado)
+        # Prefer theme-managed button colours when available
+        try:
+            copy_color = None
+            if hasattr(self, "theme_manager") and self.theme_manager:
+                try:
+                    copy_color = self.theme_manager.get_theme_default_color(
+                        ctk.CTkButton, "fg_color"
+                    )
+                except Exception:
+                    copy_color = None
+        except Exception:
+            copy_color = None
+        if not copy_color:
+            copy_color = "#7E57C2"
+
         self.copy_btn = ctk.CTkButton(
             self.form_frame,
             text="Copiar",
-            fg_color="#7E57C2",
+            fg_color=copy_color,
             font=ctk.CTkFont(size=13, weight="bold"),
             width=3,
             anchor="center",
@@ -147,11 +188,33 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self.copy_btn.grid(row=0, column=0, padx=(0, 37), sticky="ew")
 
         # Botão limpar campos (direita, igual ao main_window)
+        try:
+            clear_color = None
+            hover_color = None
+            if hasattr(self, "theme_manager") and self.theme_manager:
+                try:
+                    clear_color = self.theme_manager.get_theme_default_color(
+                        ctk.CTkButton, "fg_color"
+                    )
+                    hover_color = self.theme_manager.get_darker_color(
+                        clear_color or "#A94444", 0.1
+                    )
+                except Exception:
+                    clear_color = None
+                    hover_color = None
+        except Exception:
+            clear_color = None
+            hover_color = None
+        if not clear_color:
+            clear_color = "#A94444"
+        if not hover_color:
+            hover_color = "#FF5252"
+
         self.clear_btn = ctk.CTkButton(
             self.form_frame,
             text="❌",
-            fg_color="#A94444",
-            hover_color="#FF5252",
+            fg_color=clear_color,
+            hover_color=hover_color,
             font=ctk.CTkFont(size=13, weight="bold"),
             width=3,
             anchor="center",

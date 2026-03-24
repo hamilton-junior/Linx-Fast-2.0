@@ -5,6 +5,7 @@ log preview helpers that stay responsive to the current application state.
 """
 
 import os
+import copy
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -37,6 +38,12 @@ class SettingsWindow(ctk.CTkToplevel):
             os.path.join(os.path.dirname(__file__), "config.json")
         )
         self.config = load_config(self.config_path)
+
+        # Snapshot initial config so we can detect changes on close
+        try:
+            self._initial_config = copy.deepcopy(self.config)
+        except Exception:
+            self._initial_config = dict(self.config)
 
         # Get theme manager from master window
         self.theme_manager = self.master.theme_manager
@@ -195,7 +202,8 @@ class SettingsWindow(ctk.CTkToplevel):
         )
         ctk_themes = ["green", "blue", "dark-blue"]
         theme_files = ctk_themes + custom_themes
-        self.theme_var = ctk.StringVar(value=self.config.get("theme", "Linx"))
+        # Use the canonical 'theme_name' key from settings_manager.DEFAULT_CONFIG
+        self.theme_var = ctk.StringVar(value=self.config.get("theme_name", "green"))
         theme_combo = ctk.CTkComboBox(
             theme_select_frame,
             values=theme_files,
@@ -391,9 +399,16 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def _on_theme_change(self, value):
         """Handle theme changes in real-time"""
-        self.config["theme"] = value
+        # Persist under the canonical key name
+        self.config["theme_name"] = value
         try:
-            self.theme_manager.set_theme(value)
+            # Only set theme if it actually changed to avoid redundant refreshes
+            try:
+                current = getattr(self.theme_manager, "theme_name", None)
+            except Exception:
+                current = None
+            if value != current:
+                self.theme_manager.set_theme(value)
             save_config(self.config, self.config_path)
             self.master.update_idletasks()  # Force immediate update
         except Exception as e:
@@ -403,7 +418,13 @@ class SettingsWindow(ctk.CTkToplevel):
         """Handle appearance mode changes in real-time"""
         self.config["appearance_mode"] = value
         try:
-            self.theme_manager.set_appearance_mode(value)
+            # Only change appearance mode if it actually differs
+            try:
+                current = self.theme_manager.get_current_appearance()
+            except Exception:
+                current = None
+            if value != current:
+                self.theme_manager.set_appearance_mode(value)
             save_config(self.config, self.config_path)
             self.master.update_idletasks()  # Force immediate update
         except Exception as e:
@@ -455,8 +476,7 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkButton(
             btns,
             text="Resetar para Padrão",
-            fg_color="#A94444",
-            hover_color="#912F2F",
+            # Use theme defaults for colors so theme changes propagate
             command=self._reset_to_defaults,
         ).pack(side="right", padx=6)
 
@@ -529,10 +549,10 @@ class SettingsWindow(ctk.CTkToplevel):
             self.config.update(obj)
             save_config(self.config, self.config_path)
             messagebox.showinfo("Importado", "Configuração importada com sucesso.")
-            # Apply some settings immediately
-            if "theme" in obj:
+            # Apply some settings immediately; config uses 'theme_name'
+            if "theme_name" in obj:
                 try:
-                    self.theme_manager.set_theme(obj["theme"])
+                    self.theme_manager.set_theme(obj["theme_name"])
                 except Exception:
                     pass
             if "appearance_mode" in obj:
@@ -579,6 +599,69 @@ class SettingsWindow(ctk.CTkToplevel):
             self.grab_release()
         except Exception:
             pass
+        # If relevant config changed compared to when the settings window was
+        # opened, apply a full app-level refresh (soft restart) without closing
+        # the application. This preserves state while ensuring all windows
+        # reflect the new settings immediately.
+        try:
+            changed = False
+            keys_to_check = ("theme_name", "appearance_mode", "animations", "fonts")
+            for k in keys_to_check:
+                old = self._initial_config.get(k)
+                new = self.config.get(k)
+                if old != new:
+                    changed = True
+                    break
+            if changed:
+                # Persist final config
+                try:
+                    save_config(self.config, self.config_path)
+                except Exception:
+                    pass
+
+                # Ensure theme/appearance are set on the ThemeManager
+                try:
+                    if hasattr(self, "theme_manager") and self.theme_manager:
+                        try:
+                            # Apply appearance first
+                            if "appearance_mode" in self.config:
+                                self.theme_manager.set_appearance_mode(
+                                    self.config.get("appearance_mode")
+                                )
+                        except Exception:
+                            pass
+                        try:
+                            if "theme_name" in self.config:
+                                self.theme_manager.set_theme(
+                                    self.config.get("theme_name")
+                                )
+                        except Exception:
+                            pass
+                        # Ask ThemeManager to refresh all windows and verify colours
+                        try:
+                            self.theme_manager.refresh_all_windows_async()
+                        except Exception:
+                            pass
+                        try:
+                            self.theme_manager.verify_and_fix_all_windows()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+                # Request the main window to perform a more complete reload if available
+                try:
+                    if hasattr(self.master, "reload_theme_and_interface"):
+                        try:
+                            self.master.reload_theme_and_interface()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Unregister and destroy as usual
         if hasattr(self, "theme_manager"):
             try:
                 self.theme_manager.unregister_window(self)
@@ -596,3 +679,38 @@ class SettingsWindow(ctk.CTkToplevel):
     def destroy(self):
         """Ensure destroy always routes through cleanup logic."""
         self._close()
+
+    def on_theme_changed(self):
+        """Called by ThemeManager when the global theme/appearance changes.
+
+        Apply the current theme to this window and attempt to reconfigure the
+        toplevel background so it matches the active theme immediately.
+        """
+        try:
+            if hasattr(self, "theme_manager"):
+                try:
+                    # Prefer CTkToplevel theme default if present
+                    try:
+                        fg = self.theme_manager.get_theme_default_color(
+                            ctk.CTkToplevel, "fg_color"
+                        )
+                        try:
+                            self.configure(fg_color=fg)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
+                    # Apply theme recursively to all children/widgets
+                    try:
+                        self.theme_manager.apply_theme_to(self)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            try:
+                self.update_idletasks()
+            except Exception:
+                pass
+        except Exception:
+            pass

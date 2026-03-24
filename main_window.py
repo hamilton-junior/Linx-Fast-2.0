@@ -204,7 +204,8 @@ class TemplateApp(ctk.CTk):
             self.config = {}
 
         # Inicializar o ThemeManager primeiro (ele será usado por outras janelas)
-        self.theme_name = self.config.get("theme", "Linx")
+        # Use canonical key 'theme_name' from settings_manager
+        self.theme_name = self.config.get("theme_name", "green")
         self.appearance_mode = self.config.get("appearance_mode", "dark")
 
         # Criar e configurar o ThemeManager global
@@ -291,7 +292,7 @@ class TemplateApp(ctk.CTk):
         )
         self.settings_button.pack(side="left", padx=(5, 0))
 
-        # Favorite and Protected quick toggles for templates (Editor de Chamados)
+        # Favorite and Protected quick toggles for templates
         try:
             self.favorite_button = ctk.CTkButton(
                 selector_frame,
@@ -319,14 +320,31 @@ class TemplateApp(ctk.CTk):
 
         self.draw_all_fields()
 
-        # Botão de Senha Diária
+        # Botão de Senha Diária com imagem colorida
+        from PIL import Image
+
+        # Caminho absoluto para o ícone
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        key_icon_path = os.path.join(base_dir, "assets", "icons", "pwkey.png")
+        try:
+            key_img = Image.open(key_icon_path).resize((22, 22))
+            key_ctk_image = ctk.CTkImage(
+                light_image=key_img, dark_image=key_img, size=(22, 22)
+            )
+        except Exception as e:
+            key_ctk_image = None
+
         self.btn_daily_password = ctk.CTkButton(
             self.main_frame,
-            text="PW",
+            text="",
+            image=key_ctk_image,
             command=self.handle_daily_password,
-            width=1,
+            width=36,
             height=30,
             anchor="center",
+            fg_color="transparent",  # Fundo transparente
+            hover_color="#222222",  # (opcional) cor ao passar o mouse, pode ajustar conforme o tema
+            border_width=0,  # (opcional) sem borda
         )
         self.btn_daily_password.grid(
             sticky="w", row=2, column=0, padx=(5, 0), pady=(5, 0)
@@ -338,68 +356,133 @@ class TemplateApp(ctk.CTk):
                 self.show_snackbar("Senha diária resetada!", toast_type="info"),
             ),
         )
+        self.btn_daily_password.image = key_ctk_image  # Evita garbage collection
 
-        # Botão de Limpar Campos
-        self.btn_limpar_campos = ctk.CTkButton(
-            self.main_frame,
-            text="❌",
-            fg_color="#A94444",
-            hover_color="#912F2F",
-            anchor="right",
-            width=3,
-            height=30,
-            command=self.limpar_campos,
-        )
-        self.btn_limpar_campos.grid(row=2, column=0, pady=(5, 0), sticky="e")
-        # Tooltip para o botão de limpar campos
-        self.create_tooltip(
-            self.btn_limpar_campos, "Limpar todos os campos", fg_color="#A94444"
-        )
+        # --- Restore main action buttons below the fields ---
+        # Botão de Limpar Campos (direita)
+        try:
+            self.btn_limpar_campos = ctk.CTkButton(
+                self.main_frame,
+                text="❌",
+                fg_color="#A94444",
+                hover_color="#912F2F",
+                anchor="right",
+                width=3,
+                height=30,
+                command=self.limpar_campos,
+            )
+            self.btn_limpar_campos.grid(row=2, column=0, pady=(5, 0), sticky="e")
+            # Mark intentional custom-colour widgets so ThemeManager won't overwrite them
+            try:
+                self.btn_limpar_campos._custom_theme_overrides = True
+            except Exception:
+                pass
+            # Tooltip para o botão de limpar campos
+            try:
+                self.create_tooltip(
+                    self.btn_limpar_campos, "Limpar todos os campos", fg_color="#A94444"
+                )
+            except Exception:
+                pass
+        except Exception:
+            # Não bloquear se CTkButton falhar em ambientes estranhos
+            pass
 
-        # Botão de Copiar Template
-        ctk.CTkButton(
-            self.main_frame,
-            text="Copiar para área de transferência",
-            fg_color="#7E57C2",
-            hover_color="#6A4BB3",
-            command=self.copy_template,
-        ).grid(row=2, column=0, pady=(5, 5))
-        # Botão de Visualizar Template
-        ctk.CTkButton(
-            self.main_frame,
-            text="Visualizar Resultado",
-            fg_color="#5E35B1",
-            hover_color="#512DA8",
-            command=self.preview_template,
-        ).grid(row=3, column=0, pady=(5, 5))
-        # Botão de Editar Template
-        ctk.CTkButton(
-            self.main_frame,
-            text="Editar Templates",
-            fg_color="#7E57C2",
-            hover_color="#6A4BB3",
-            command=self.open_template_editor,
-        ).grid(row=4, column=0, pady=(5, 5))
+        # Botões principais (mantemos referências para permitir atualização dinâmica de tema)
+        try:
+            default_btn_fg = self.theme_manager.get_theme_default_color(
+                ctk.CTkButton, "fg_color"
+            )
+        except Exception:
+            default_btn_fg = None
+
+        # Copiar
+        try:
+            self.copy_button = ctk.CTkButton(
+                self.main_frame,
+                text="Copiar para área de transferência",
+                fg_color=default_btn_fg,
+                hover_color=(
+                    self.theme_manager.get_darker_color(default_btn_fg, 0.08)
+                    if default_btn_fg
+                    else None
+                ),
+                command=self.copy_template,
+            )
+            self.copy_button.grid(row=2, column=0, pady=(5, 5))
+        except Exception:
+            pass
+
+        # Visualizar
+        try:
+            self.preview_button = ctk.CTkButton(
+                self.main_frame,
+                text="Visualizar Resultado",
+                fg_color=default_btn_fg,
+                hover_color=(
+                    self.theme_manager.get_darker_color(default_btn_fg, 0.08)
+                    if default_btn_fg
+                    else None
+                ),
+                command=self.preview_template,
+            )
+            self.preview_button.grid(row=3, column=0, pady=(5, 5))
+        except Exception:
+            pass
+
+        # Editar (logo abaixo dos outros botões)
+        try:
+            self.edit_button = ctk.CTkButton(
+                self.main_frame,
+                text="Editar Templates",
+                fg_color=default_btn_fg,
+                hover_color=(
+                    self.theme_manager.get_darker_color(default_btn_fg, 0.08)
+                    if default_btn_fg
+                    else None
+                ),
+                command=self.open_template_editor,
+            )
+            self.edit_button.grid(row=4, column=0, pady=(5, 5))
+        except Exception:
+            pass
+
         # Botão de Adicionar Campo
-        self.add_btn = ctk.CTkButton(
-            self.main_frame,
-            text="+ Adicionar Campo",
-            width=150,
-            height=30,
-            command=self.prompt_new_field,
-            fg_color="#333",
-            hover_color="#444",
-            font=ctk.CTkFont(size=12),
-        )
-        self.add_btn.grid(row=5, column=0, pady=(5, 2))
+        try:
+            self.add_btn = ctk.CTkButton(
+                self.main_frame,
+                text="+ Adicionar Campo",
+                width=150,
+                height=30,
+                command=self.prompt_new_field,
+                fg_color="#333",
+                hover_color="#444",
+                font=ctk.CTkFont(size=12),
+            )
+            self.add_btn.grid(row=5, column=0, pady=(5, 2))
+            try:
+                self.add_btn._custom_theme_overrides = True
+            except Exception:
+                pass
+        except Exception:
+            pass
+
         # Botão de Modo Simples
-        ctk.CTkButton(
-            self.main_frame,
-            text="Modo Simples",
-            fg_color="#5E35B1",
-            hover_color="#4527A0",
-            command=self.open_quick_mode,
-        ).grid(row=6, column=0, pady=(5, 5))
+        try:
+            tmp = ctk.CTkButton(
+                self.main_frame,
+                text="Modo Simples",
+                fg_color="#5E35B1",
+                hover_color="#4527A0",
+                command=self.open_quick_mode,
+            )
+            tmp.grid(row=6, column=0, pady=(5, 5))
+            try:
+                tmp._custom_theme_overrides = True
+            except Exception:
+                pass
+        except Exception:
+            pass
 
         # --- Frame inferior para label de crédito e botão de info alinhados ---
         bottom_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -428,11 +511,33 @@ class TemplateApp(ctk.CTk):
             justify="center",
         )
         label_autor.grid(row=0, column=1, sticky="ew", padx=(2, 2))
+        try:
+            label_autor._custom_theme_overrides = True
+        except Exception:
+            pass
 
         self.main_frame.grid_rowconfigure(100, weight=0)
 
         self._init_undo_redo()
         self._bind_undo_redo_shortcuts()
+
+    def _create_toplevel(self, parent=None):
+        """Helper to create a CTkToplevel and register it with ThemeManager.
+
+        Use this instead of calling ctk.CTkToplevel(...) directly so all popups
+        are registered and receive theme updates automatically.
+        """
+        p = parent or self
+        win = ctk.CTkToplevel(p)
+        try:
+            if hasattr(self, "theme_manager") and self.theme_manager:
+                try:
+                    self.theme_manager.register_window(win)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return win
 
     def on_bug_button_click(self):
         # Abre uma janela com links para formulários do NocoDB e exibe uma imagem da pasta /assets/icons/images
@@ -457,8 +562,7 @@ class TemplateApp(ctk.CTk):
                 "bug.png",
             ),
         ]
-
-        win = ctk.CTkToplevel(self)
+        win = self._create_toplevel()
         win.title("Informações & Feedback")
         win.geometry("250x285")
         win.resizable(True, True)
@@ -756,6 +860,81 @@ class TemplateApp(ctk.CTk):
     def _bind_undo_redo_shortcuts(self):
         self.bind_all("<Control-z>", self.undo_fields)
         self.bind_all("<Control-y>", self.redo_fields)
+
+    def on_theme_changed(self):
+        """Called by ThemeManager when the global theme or appearance changes.
+
+        Reapplies appearance recursively and updates key widget colours that
+        were created with theme-dependent colours so the UI updates immediately.
+        """
+        try:
+            if not hasattr(self, "theme_manager") or not self.theme_manager:
+                return
+            # Apply theme recursively to all widgets in this window
+            try:
+                self.theme_manager.apply_theme_to(self)
+            except Exception:
+                pass
+
+            # Update key buttons to use theme defaults (ensures colours update even if
+            # they were created earlier with theme-derived colours)
+            default_btn_fg = self.theme_manager.get_theme_default_color(
+                ctk.CTkButton, "fg_color"
+            )
+            hover = self.theme_manager.get_darker_color(default_btn_fg, 0.08)
+
+            for attr in (
+                "copy_button",
+                "preview_button",
+                "edit_button",
+                "add_btn",
+                "pin_button",
+                "settings_button",
+                "favorite_button",
+                "protect_button",
+                "btn_daily_password",
+            ):
+                try:
+                    w = getattr(self, attr, None)
+                    if w:
+                        try:
+                            w.configure(fg_color=default_btn_fg)
+                        except Exception:
+                            pass
+                        try:
+                            w.configure(hover_color=hover)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            # Special case: keep the 'limpar' button visually distinct (darker)
+            try:
+                if hasattr(self, "btn_limpar_campos") and self.btn_limpar_campos:
+                    del_color = self.theme_manager.get_darker_color(
+                        default_btn_fg, 0.35
+                    )
+                    try:
+                        self.btn_limpar_campos.configure(fg_color=del_color)
+                    except Exception:
+                        pass
+                    try:
+                        self.btn_limpar_campos.configure(
+                            hover_color=self.theme_manager.get_darker_color(
+                                del_color, 0.1
+                            )
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        except Exception:
+            logger.exception("Error in on_theme_changed of main window")
+
+    # Note: a more comprehensive reload_theme_and_interface exists later in this
+    # file and will be used by ThemeManager when available. We intentionally do
+    # not alias it here to avoid duplicate definitions.
 
     # TODO: Mover métodos auxiliares para módulos separados (fields.py, visual_feedback.py, utils.py)
     # TODO: Implementar undo/redo e feedback visual aprimorado nas próximas etapas
@@ -1886,7 +2065,7 @@ class TemplateApp(ctk.CTk):
         # Substitui placeholders dinâmicos
         template = placeholder_engine.process(template)
 
-        preview = ctk.CTkToplevel(self)
+        preview = self._create_toplevel()
         preview.title("Visualização do Template")
         preview.geometry("600x400")
         preview.transient(self)
@@ -2323,7 +2502,7 @@ class TemplateApp(ctk.CTk):
             pasta_escolhida = [None]
 
             def abrir_nova_pasta():
-                win_nova = ctk.CTkToplevel(self)
+                win_nova = self._create_toplevel()
                 win_nova.title("Nova Pasta")
                 win_nova.geometry("320x140")
                 win_nova.grab_set()
@@ -2371,7 +2550,7 @@ class TemplateApp(ctk.CTk):
 
             def escolher():
                 while True:
-                    win = ctk.CTkToplevel(self)
+                    win = self._create_toplevel()
                     win.title("Escolher Pasta")
                     win.geometry("350x200")
                     win.grab_set()
@@ -2468,7 +2647,7 @@ class TemplateApp(ctk.CTk):
             if nocodb_templates:
                 import customtkinter as ctk
 
-                unify_win = ctk.CTkToplevel(self)
+                unify_win = self._create_toplevel()
                 unify_win.title("Unificar Templates Iguais")
                 unify_win.geometry("600x260")
                 unify_win.grab_set()
@@ -2683,7 +2862,7 @@ class TemplateApp(ctk.CTk):
             import datetime
             import os
 
-            compare_win = ctk.CTkToplevel(self)
+            compare_win = self._create_toplevel()
             compare_win.title("Comparar Templates Duplicados")
             compare_win.update_idletasks()
             # Calcula tamanho do monitor
@@ -3069,7 +3248,7 @@ class TemplateApp(ctk.CTk):
             pasta_escolhida = [None]
 
             def abrir_nova_pasta():
-                win_nova = ctk.CTkToplevel(self)
+                win_nova = self._create_toplevel()
                 win_nova.title("Nova Pasta")
                 win_nova.geometry("320x140")
                 win_nova.grab_set()
@@ -3117,7 +3296,7 @@ class TemplateApp(ctk.CTk):
                 win_nova.wait_window()
 
             def show_pasta_selector(parent, categorias, pasta_atual, on_nova_pasta):
-                win = ctk.CTkToplevel(parent)
+                win = self._create_toplevel(parent)
                 win.title("Escolher Pasta")
                 win.geometry("350x200")
                 win.grab_set()
@@ -3156,7 +3335,7 @@ class TemplateApp(ctk.CTk):
                 while True:
 
                     def abrir_nova_pasta():
-                        win_nova = ctk.CTkToplevel(self)
+                        win_nova = self._create_toplevel()
                         win_nova.title("Nova Pasta")
                         win_nova.geometry("320x140")
                         win_nova.grab_set()
@@ -3268,7 +3447,7 @@ class TemplateApp(ctk.CTk):
                 return
             if local_content != conteudo:
                 # Mostra janela de comparação lado a lado (NocoDB à esquerda, Local à direita)
-                compare_win = ctk.CTkToplevel(self)
+                compare_win = self._create_toplevel()
                 compare_win.title("Comparar Templates")
                 compare_win.geometry("900x500")
                 compare_win.grab_set()
@@ -3353,6 +3532,9 @@ class TemplateApp(ctk.CTk):
                 except Exception:
                     local_modified = "-"
 
+                # Row index to place informational labels below the textboxes
+                row_info = 4
+
                 ctk.CTkLabel(
                     compare_win,
                     text=f"Criação: {nocodb_created_fmt}",
@@ -3374,6 +3556,24 @@ class TemplateApp(ctk.CTk):
                     font=ctk.CTkFont(size=11, slant="italic"),
                 ).grid(row=3, column=1, padx=10, sticky="w")
                 row_info += 1
+
+                # Tenta determinar datetimes para comparação (pode ser None)
+                nocodb_dt = None
+                local_dt = None
+                try:
+                    if nocodb_updated:
+                        nocodb_dt = datetime.datetime.fromisoformat(
+                            nocodb_updated.replace("Z", "+00:00")
+                        )
+                except Exception:
+                    nocodb_dt = None
+                try:
+                    if os.path.exists(local_path):
+                        local_dt = datetime.datetime.fromtimestamp(
+                            os.path.getmtime(local_path)
+                        )
+                except Exception:
+                    local_dt = None
 
                 info_text = ""
                 if nocodb_dt and local_dt:
@@ -3407,7 +3607,7 @@ class TemplateApp(ctk.CTk):
                     # Pergunta se deseja atualizar o título do template usando customtkinter
                     if old_nome != nome:
                         # Janela customtkinter para atualizar título
-                        update_win = ctk.CTkToplevel(self)
+                        update_win = self._create_toplevel()
                         update_win.title("Atualizar Título")
                         update_win.geometry("420x260")
                         update_win.grab_set()
@@ -3480,7 +3680,7 @@ class TemplateApp(ctk.CTk):
                                 move_result["resp"] = False
                                 move_win.destroy()
 
-                            move_win = ctk.CTkToplevel(self)
+                            move_win = self._create_toplevel()
                             move_win.title("Mover de Pasta?")
                             move_win.geometry("420x170")
                             move_win.grab_set()
@@ -3599,7 +3799,7 @@ class TemplateApp(ctk.CTk):
                 # Se o nome do NocoDB for diferente do local, perguntar se deseja atualizar o nome
                 if old_nome != nome:
                     # Janela customtkinter para atualizar título
-                    update_win = ctk.CTkToplevel(self)
+                    update_win = self._create_toplevel()
                     update_win.title("Atualizar Título")
                     update_win.geometry("420x260")
                     update_win.grab_set()
@@ -3671,7 +3871,7 @@ class TemplateApp(ctk.CTk):
                             move_result["resp"] = False
                             move_win.destroy()
 
-                        move_win = ctk.CTkToplevel(self)
+                        move_win = self._create_toplevel()
                         move_win.title("Mover de Pasta?")
                         move_win.geometry("420x170")
                         move_win.grab_set()
@@ -3802,7 +4002,7 @@ class TemplateApp(ctk.CTk):
         import customtkinter as ctk
 
         # Cria a janela principal do diálogo
-        nocodb_templates_dialog = ctk.CTkToplevel(self)
+        nocodb_templates_dialog = self._create_toplevel()
         nocodb_templates_dialog.title("Templates Compartilhados")
         nocodb_templates_dialog.geometry("700x500")
         nocodb_templates_dialog.grab_set()
@@ -3875,7 +4075,7 @@ class TemplateApp(ctk.CTk):
         # --- Lógica de preenchimento e seleção ---
         api_url = "https://app.nocodb.com"
         base_name = "p02k6lvq2via5sv"
-        table_name = "Templates"
+        table_name = "mpvh49wivawwdx7"
         token = "UifsYUdNbfJFWVz3t7oOIPo2Idd51ykk2I-9FnzK"
 
         templates = self.fetch_nocodb_templates(api_url, base_name, table_name, token)
@@ -3961,7 +4161,7 @@ class TemplateApp(ctk.CTk):
         target = parent if parent is not None else self
 
         # Cria a janela flutuante
-        snackbar = ctk.CTkToplevel(target)
+        snackbar = self._create_toplevel(target)
         snackbar.overrideredirect(True)
         snackbar.attributes("-topmost", True)
         snackbar.configure(fg_color=style["fg"])
@@ -4077,7 +4277,7 @@ class TemplateApp(ctk.CTk):
             if tooltip["window"] is not None:
                 return
             try:
-                tooltip["window"] = tw = ctk.CTkToplevel(widget)
+                tooltip["window"] = tw = self._create_toplevel(widget)
                 tw.overrideredirect(True)
                 tw.attributes("-topmost", True)
                 tw.transient(

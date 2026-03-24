@@ -19,12 +19,12 @@
     "favorito": true,
     "protegido": false
   },
-  "Exemplo de Condicionais": {
-    "nocodb_id": "72",
-    "protegido": false,
-    "favorito": true
-  },
   "Template Exemplo buscado da API": {
     "nocodb_id": "68"
+  },
+  "Exemplo de Condicionais": {
+    "nocodb_id": "72",
+    "protegido": true,
+    "favorito": false
   }
 }

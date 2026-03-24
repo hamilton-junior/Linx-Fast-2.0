@@ -20,7 +20,13 @@ class ThemeManager:
     def __init__(self, theme_name: str = "green", mode: str = "dark") -> None:
         self.theme_name = theme_name
         self.mode = mode
+        # Re-entrancy guards to avoid recursive theme/appearance changes
+        self._in_set_theme = False
+        self._in_set_appearance = False
         self.windows: List[ctk.CTkBaseClass] = []  # type: ignore[type-arg]
+        # debounce flags to avoid scheduling many refreshes in a short time
+        self._refresh_pending = False
+        self._verify_pending = False
 
         self.base_dir = Path(__file__).resolve().parent
         self.themes_dir = self.base_dir / "themes"
@@ -31,20 +37,62 @@ class ThemeManager:
 
     # ----------------------------------------------------------------- setters
     def set_theme(self, theme_name: str) -> None:
-        """Set theme and update all managed windows."""
-        theme_path = self.themes_dir / f"{theme_name}.json"
-        if theme_path.exists():
-            ctk.set_default_color_theme(str(theme_path))
-        else:
-            ctk.set_default_color_theme(theme_name)
-        self.theme_name = theme_name
-        self._refresh_all_windows()
+        """Set theme and update all managed windows. Does NOT change appearance mode."""
+        if theme_name == self.theme_name:
+            logger.debug("set_theme called with same theme '%s' - skipping", theme_name)
+            return
+
+        if self._in_set_theme:
+            logger.debug(
+                "Already setting theme, skipping nested call for '%s'", theme_name
+            )
+            return
+
+        self._in_set_theme = True
+        try:
+            theme_path = self.themes_dir / f"{theme_name}.json"
+            if theme_path.exists():
+                ctk.set_default_color_theme(str(theme_path))
+            else:
+                ctk.set_default_color_theme(theme_name)
+            self.theme_name = theme_name
+            # Do NOT change appearance mode here!
+            try:
+                if not self._refresh_pending:
+                    self._refresh_pending = True
+                    self.refresh_all_windows_async()
+            finally:
+                self._refresh_pending = False
+        finally:
+            self._in_set_theme = False
 
     def set_appearance_mode(self, mode: str) -> None:
-        """Set appearance mode and refresh open windows."""
-        ctk.set_appearance_mode(mode)
-        self.mode = mode
-        self._refresh_all_windows()
+        """Set appearance mode and refresh open windows. Does NOT change theme."""
+        if mode == self.mode:
+            logger.debug(
+                "set_appearance_mode called with same mode '%s' - skipping", mode
+            )
+            return
+
+        if self._in_set_appearance:
+            logger.debug(
+                "Already setting appearance mode, skipping nested call for '%s'", mode
+            )
+            return
+
+        self._in_set_appearance = True
+        try:
+            ctk.set_appearance_mode(mode)
+            self.mode = mode
+            # Do NOT change theme here!
+            try:
+                if not self._refresh_pending:
+                    self._refresh_pending = True
+                    self.refresh_all_windows_async()
+            finally:
+                self._refresh_pending = False
+        finally:
+            self._in_set_appearance = False
 
     def toggle_appearance(self) -> None:
         self.mode = "dark" if self.mode == "light" else "light"
@@ -84,33 +132,322 @@ class ThemeManager:
                     pass
 
     # --------------------------------------------------------- theme propagation
-    def _refresh_all_windows(self) -> None:
-        """Refresh all managed windows to apply new theme."""
+    def _refresh_all_windows_safe(self) -> None:
+        """Refresh all managed windows to apply new theme, safely and responsively."""
+        # Use after_idle to avoid blocking the mainloop and prevent freezes
+        for window in list(self.windows):
+            try:
+                if not getattr(window, "winfo_exists", lambda: False)():
+                    continue
+                # Força update imediato para todas as janelas, inclusive main_window
+                self._refresh_single_window_safe(window)
+            except Exception as exc:
+                logger.error("Error scheduling refresh for window %s: %s", window, exc)
+
+    def _refresh_single_window_safe(self, window):
+        """Refresh a single window and all its widgets, handling exceptions and avoiding recursion issues."""
+        try:
+            if not getattr(window, "winfo_exists", lambda: False)():
+                return
+            # Atualiza todos os widgets recursivamente
+            self._apply_theme_to_all_widgets(window)
+            # Chama métodos de atualização específicos se existirem
+            if hasattr(window, "on_theme_changed"):
+                try:
+                    window.on_theme_changed()
+                except Exception:
+                    pass
+            if hasattr(window, "reload_theme_and_interface"):
+                try:
+                    window.reload_theme_and_interface()
+                except Exception:
+                    pass
+            # Recursivo para filhos
+            self._apply_appearance_recursive(window)
+            # Força redraw
+            try:
+                window.update_idletasks()
+            except Exception:
+                pass
+        except Exception as exc:
+            logger.error("Error refreshing window %s: %s", window, exc)
+
+    def _apply_theme_to_all_widgets(self, widget):
+        """Recursively update all CTk widgets' colors to match the current theme."""
+        try:
+            widget_class = widget.__class__.__name__
+            theme = ctk.ThemeManager.theme
+            current_mode = self.get_current_appearance()
+            # Atualiza todas as propriedades de cor se presentes no tema
+            for prop in (
+                "fg_color",
+                "bg_color",
+                "text_color",
+                "border_color",
+                "hover_color",
+            ):
+                try:
+                    if prop in theme.get(widget_class, {}):
+                        color = theme[widget_class][prop]
+                        if isinstance(color, (list, tuple)):
+                            color = (
+                                color[0] if current_mode.lower() == "dark" else color[1]
+                            )
+                        widget.configure(**{prop: color})
+                except Exception:
+                    pass
+            # Tratamento especial para OptionMenu, ComboBox, Listbox, etc
+            if hasattr(widget, "dropdown_menu") and widget.dropdown_menu:
+                self._apply_theme_to_all_widgets(widget.dropdown_menu)
+            if hasattr(widget, "listbox") and widget.listbox:
+                self._apply_theme_to_all_widgets(widget.listbox)
+            # Recursivo para filhos
+            for child in widget.winfo_children():
+                self._apply_theme_to_all_widgets(child)
+        except Exception:
+            pass
+
+    def _refresh_single_window(self, window: ctk.CTkBaseClass) -> None:
+        """Refresh a single window safely. Intended to be called from the mainloop via .after."""
+        try:
+            if not getattr(window, "winfo_exists", lambda: False)():
+                return
+            if hasattr(window, "on_theme_changed"):
+                try:
+                    window.on_theme_changed()
+                except Exception:
+                    # Fallback to reload or recursive apply
+                    if hasattr(window, "reload_theme_and_interface"):
+                        try:
+                            window.reload_theme_and_interface()
+                        except Exception:
+                            self.apply_theme_to(window)
+                    else:
+                        self.apply_theme_to(window)
+            elif hasattr(window, "reload_theme_and_interface"):
+                try:
+                    window.reload_theme_and_interface()
+                except Exception:
+                    self.apply_theme_to(window)
+            else:
+                self.apply_theme_to(window)
+
+            try:
+                window.update_idletasks()
+            except Exception:
+                pass
+        except Exception as exc:
+            logger.debug("_refresh_single_window failed for %s: %s", window, exc)
+
+    def refresh_all_windows_async(self) -> None:
+        """Schedule a non-blocking refresh for all registered windows.
+
+        This schedules per-window refresh using each window's .after(1, ...), which
+        keeps the mainloop responsive and avoids synchronous work that can freeze
+        the UI when many windows are open.
+        """
         alive = []
         for window in list(self.windows):
-            if not isinstance(window, (ctk.CTk, ctk.CTkToplevel)) or not window.winfo_exists():
-                continue
-            alive.append(window)
             try:
-                if hasattr(window, "on_theme_changed"):
-                    window.on_theme_changed()
-                elif hasattr(window, "reload_theme_and_interface"):
-                    window.reload_theme_and_interface()
-                else:
-                    self._apply_appearance_recursive(window)
-                    window.update_idletasks()
+                if not getattr(window, "winfo_exists", lambda: False)():
+                    continue
+                alive.append(window)
+                try:
+                    # Prefer scheduling via the window itself so the callback runs
+                    # in the right context and doesn't block the main thread.
+                    window.after(1, lambda w=window: self._refresh_single_window(w))
+                except Exception:
+                    # If scheduling fails (rare), do a best-effort synchronous call
+                    self._refresh_single_window(window)
             except Exception as exc:
-                logger.error("Error refreshing window %s: %s", window, exc)
+                logger.debug("Error scheduling refresh for window %s: %s", window, exc)
+        # Prune dead windows
         self.windows = alive
 
+    def verify_and_fix_all_windows(self) -> None:
+        """Verify widget colours on all registered windows and fix mismatches.
+
+        This will schedule a per-window non-blocking verification that checks
+        each widget's relevant colour properties against the active theme and
+        updates widgets that do not declare _custom_theme_overrides = True.
+        """
+        alive = []
+        for window in list(self.windows):
+            try:
+                if not getattr(window, "winfo_exists", lambda: False)():
+                    continue
+                alive.append(window)
+                try:
+                    window.after(1, lambda w=window: self._verify_and_fix_window(w))
+                except Exception:
+                    # best-effort synchronous fallback
+                    self._verify_and_fix_window(window)
+            except Exception as exc:
+                logger.debug("Error scheduling verify for window %s: %s", window, exc)
+        self.windows = alive
+
+    def _verify_and_fix_window(self, window: ctk.CTkBaseClass) -> None:
+        """Walk a window's widget tree and ensure colours match theme defaults.
+
+        This is conservative: widgets that expose attribute
+        `_custom_theme_overrides = True` are left untouched.
+        """
+        try:
+            if not getattr(window, "winfo_exists", lambda: False)():
+                return
+
+            theme = getattr(ctk.ThemeManager, "theme", {}) or {}
+            current_mode = self.get_current_appearance()
+
+            def _normalize(col):
+                if isinstance(col, (list, tuple)):
+                    return col[0] if current_mode.lower() == "dark" else col[1]
+                return col
+
+            def _check_widget(widget):
+                try:
+                    if getattr(widget, "_custom_theme_overrides", False):
+                        return
+                    cls_name = widget.__class__.__name__
+                    if cls_name not in theme:
+                        return
+                    props = (
+                        "fg_color",
+                        "bg_color",
+                        "text_color",
+                        "border_color",
+                        "hover_color",
+                    )
+                    for prop in props:
+                        try:
+                            if prop not in theme[cls_name]:
+                                continue
+                            desired = _normalize(theme[cls_name][prop])
+                            # Attempt to read current value
+                            current = None
+                            try:
+                                if hasattr(widget, "cget"):
+                                    current = widget.cget(prop)
+                            except Exception:
+                                current = None
+                            if current is None:
+                                try:
+                                    current = getattr(widget, prop, None)
+                                except Exception:
+                                    current = None
+                            # If mismatch, try to configure
+                            if current is not None and str(current) != str(desired):
+                                try:
+                                    widget.configure(**{prop: desired})
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            # Traverse
+            stack = [window]
+            while stack:
+                w = stack.pop()
+                _check_widget(w)
+                try:
+                    for c in w.winfo_children():
+                        stack.append(c)
+                except Exception:
+                    pass
+            try:
+                window.update_idletasks()
+            except Exception:
+                pass
+        except Exception as exc:
+            logger.debug("_verify_and_fix_window failed for %s: %s", window, exc)
+
     def _apply_appearance_recursive(self, widget: ctk.CTkBaseClass) -> None:  # type: ignore[type-arg]
+        # First try to let the widget apply its own appearance mode if available
         if hasattr(widget, "_apply_appearance_mode"):
             try:
                 widget._apply_appearance_mode(self.mode)
             except Exception:
                 pass
+
+        # Best-effort: apply theme-default colours to common widget classes so
+        # they immediately reflect the active theme even if they were created
+        # earlier with theme-derived colours. Widgets can opt-out by setting
+        # attribute `_custom_theme_overrides = True`.
+        try:
+            if not getattr(widget, "_custom_theme_overrides", False):
+                cls_name = widget.__class__.__name__
+                # Common mappings: widget class -> (property, optional transform)
+                try:
+                    if cls_name == "CTkButton":
+                        fg = self.get_theme_default_color(ctk.CTkButton, "fg_color")
+                        try:
+                            widget.configure(fg_color=fg)
+                        except Exception:
+                            pass
+                        try:
+                            # hover_color not always present
+                            widget.configure(
+                                hover_color=self.get_darker_color(fg, 0.08)
+                            )
+                        except Exception:
+                            pass
+                    elif cls_name in ("CTkEntry", "CTkComboBox", "CTkOptionMenu"):
+                        try:
+                            border = self.get_theme_default_color(
+                                ctk.CTkEntry, "border_color"
+                            )
+                            widget.configure(border_color=border)
+                        except Exception:
+                            pass
+                    elif cls_name == "CTkTextbox":
+                        try:
+                            border = self.get_theme_default_color(
+                                ctk.CTkTextbox, "border_color"
+                            )
+                            widget.configure(border_color=border)
+                        except Exception:
+                            pass
+                    elif cls_name == "CTkLabel":
+                        try:
+                            txt = self.get_theme_default_color(
+                                ctk.CTkLabel, "text_color"
+                            )
+                            widget.configure(text_color=txt)
+                        except Exception:
+                            pass
+                    elif cls_name == "CTkFrame":
+                        try:
+                            bg = self.get_theme_default_color(ctk.CTkFrame, "fg_color")
+                            widget.configure(fg_color=bg)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Recurse into children
         for child in widget.winfo_children():
             self._apply_appearance_recursive(child)
+
+    def apply_theme_to(self, widget: ctk.CTkBaseClass) -> None:
+        """Public helper to apply current theme/appearance recursively to a widget.
+
+        This is useful for windows or complex widgets that want to refresh their
+        internal state when the global theme changes.
+        """
+        try:
+            if not widget or not getattr(widget, "winfo_exists", lambda: False)():
+                return
+            self._apply_appearance_recursive(widget)
+            try:
+                widget.update_idletasks()
+            except Exception:
+                pass
+        except Exception:
+            logger.exception("Failed to apply theme to widget %s", widget)
 
     # ----------------------------------------------------------- helper methods
     def get_theme_default_color(self, widget_class, property_name: str) -> str:
@@ -147,4 +484,3 @@ class ThemeManager:
         g = int(g * (1 - factor))
         b = int(b * (1 - factor))
         return f"#{r:02x}{g:02x}{b:02x}"
-

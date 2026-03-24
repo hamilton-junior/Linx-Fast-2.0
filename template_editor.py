@@ -2,6 +2,8 @@ import customtkinter as ctk
 import logging
 import tkinter as tk
 import ctk_dialogs
+from services.dialog_service import DialogService
+from services.template_service import TemplateServiceAdapter
 
 from logger_config import auto_log_functions
 
@@ -19,6 +21,18 @@ class TemplateEditor(ctk.CTkToplevel):
     autocomplete popup, and methods the rest of the app expects
     (load_template, save_template, refresh_placeholder_list, etc.).
     """
+
+    def on_theme_changed(self):
+        """Called by ThemeManager when theme changes. Apply the current theme to
+        this editor and its widgets."""
+        try:
+            if hasattr(self, "theme_manager") and self.theme_manager:
+                try:
+                    self.theme_manager.apply_theme_to(self)
+                except Exception:
+                    pass
+        except Exception:
+            logger.exception("Error applying theme in TemplateEditor")
 
     def __init__(
         self,
@@ -46,6 +60,16 @@ class TemplateEditor(ctk.CTkToplevel):
                 pass
 
         self.manager = manager
+        # DIP: wrap manager with an adapter so TemplateEditor depends on an abstraction
+        try:
+            self.template_service = TemplateServiceAdapter(self.manager)
+        except Exception:
+            self.template_service = None
+        # Dialog abstraction for easier testing and inversion of dependency
+        try:
+            self.dialogs = DialogService(self)
+        except Exception:
+            self.dialogs = None
         self.get_placeholders = get_placeholders_callback
         self.template_names = self.manager.get_template_names()
 
@@ -93,15 +117,24 @@ class TemplateEditor(ctk.CTkToplevel):
             width=self._width_for_text("🔒"),
             command=self.toggle_protected,
         ).pack(side="left", padx=4)
-        ctk.CTkButton(top_btns, text="Novo", command=self.create_new_template).pack(
-            side="left", padx=6
-        )
-        ctk.CTkButton(top_btns, text="Renomear", command=self.rename_template).pack(
-            side="left", padx=6
-        )
-        ctk.CTkButton(top_btns, text="Importar", command=self.import_from_nocodb).pack(
-            side="left", padx=6
-        )
+        ctk.CTkButton(
+            top_btns,
+            text="Novo",
+            width=self._width_for_text("Novo"),
+            command=self.create_new_template,
+        ).pack(side="left", padx=6)
+        ctk.CTkButton(
+            top_btns,
+            text="Renomear",
+            width=self._width_for_text("Renomear"),
+            command=self.rename_template,
+        ).pack(side="left", padx=6)
+        ctk.CTkButton(
+            top_btns,
+            text="Importar",
+            width=self._width_for_text("Importar"),
+            command=self.import_from_nocodb,
+        ).pack(side="left", padx=6)
 
         # Main paned area: editor and placeholder box
         paned = ctk.CTkFrame(self)
@@ -175,16 +208,18 @@ class TemplateEditor(ctk.CTkToplevel):
         # Buttons frame anchored at bottom (right panel)
         btns = ctk.CTkFrame(right_frame)
         btns.grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(0, 8))
-        # left-aligned buttons for actions (these remain at the bottom)
-        # give buttons a minimum width so they don't get squashed on small windows
+        # centered buttons for actions (these remain at the bottom)
+        inner_btns = ctk.CTkFrame(btns)
+        inner_btns.pack(anchor="center")
+        # give buttons a minimal width fitting their text
         ctk.CTkButton(
-            btns,
+            inner_btns,
             text="+ Campo",
             command=self.open_placeholder_picker,
             width=self._width_for_text("+ Campo"),
         ).pack(side="left", padx=(0, 6))
         ctk.CTkButton(
-            btns,
+            inner_btns,
             text="Autocomplete",
             command=self.show_autocomplete,
             width=self._width_for_text("Autocomplete"),
@@ -205,8 +240,13 @@ class TemplateEditor(ctk.CTkToplevel):
                 base = self.theme_manager.get_theme_default_color(
                     ctk.CTkButton, "fg_color"
                 )
-                save_color = self.theme_manager.get_lighter_color(base, 0.08)
-                delete_color = self.theme_manager.get_lighter_color(base, -0.08)
+                # Save should use theme default (no extra lighten)
+                save_color = base
+                # Delete should be a bit darker than normal
+                try:
+                    delete_color = self.theme_manager.get_darker_color(base, 0.08)
+                except Exception:
+                    delete_color = base
         except Exception:
             base = None
         if not save_color:
@@ -313,6 +353,28 @@ class TemplateEditor(ctk.CTkToplevel):
                 label = name[name.index("]") + 1 :].strip() or ptype
             return (raw, label, ptype)
 
+        # determine a snapshot of what would be shown and skip rebuilding UI if nothing changed
+        try:
+            fixed_labels = tuple(sorted((phs_main.get("fixed", []) if 'phs_main' in locals() else self.get_placeholders().get("fixed", []))))
+        except Exception:
+            fixed_labels = tuple()
+        try:
+            parsed_dyn = [parse_placeholder(d) for d in dynamic]
+            dynamic_filtered = [raw for (raw, label, ptype) in parsed_dyn if (label or "").lower().strip() not in (f.lower().strip() for f in fixed_labels)]
+        except Exception:
+            dynamic_filtered = list(dynamic)
+
+        q_val = ((self._ph_search_var.get() if hasattr(self, "_ph_search_var") else "").strip().lower())
+        cur_ui_snapshot = (tuple(fixed_labels), tuple(sorted(dynamic_filtered)), q_val)
+        if getattr(self, "_ph_ui_snapshot", None) == cur_ui_snapshot:
+            # nothing changed in what would be displayed; skip expensive rebuild
+            return
+        # otherwise store snapshot and rebuild
+        try:
+            self._ph_ui_snapshot = cur_ui_snapshot
+        except Exception:
+            pass
+
         # clear existing items
         try:
             for w in list(self.placeholder_container.winfo_children()):
@@ -371,11 +433,39 @@ class TemplateEditor(ctk.CTkToplevel):
             ("Personalizados", dynamic_filtered),
         ):
             try:
+                # choose a separator color with good contrast against theme bg
+                sep_color = None
+                if hasattr(self, "theme_manager"):
+                    try:
+                        # try to infer background color for the placeholder area
+                        bg = self.theme_manager.get_theme_default_color(
+                            ctk.CTkFrame, "fg_color"
+                        )
+                        # convert hex to luminance
+                        col = bg.lstrip("#")
+                        if len(col) == 6:
+                            r = int(col[0:2], 16)
+                            g = int(col[2:4], 16)
+                            b = int(col[4:6], 16)
+                            lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+                        else:
+                            lum = 0
+                        # if background is dark, use a lighter separator, else use darker
+                        if lum < 128:
+                            sep_color = self.theme_manager.get_lighter_color(bg, 0.6)
+                        else:
+                            sep_color = self.theme_manager.get_darker_color(bg, 0.6)
+                    except Exception:
+                        sep_color = self.theme_manager.get_theme_default_color(
+                            ctk.CTkLabel, "text_color"
+                        )
                 hdr = ctk.CTkLabel(
                     self.placeholder_container,
-                    text=f"--- {section_name} ---",
+                    text=f"────── {section_name} ──────",
                     anchor="center",
                     justify="center",
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                    text_color=sep_color,
                 )
                 hdr.pack(fill="x", padx=2, pady=(6, 2))
             except Exception:
@@ -402,14 +492,56 @@ class TemplateEditor(ctk.CTkToplevel):
                     btn = ctk.CTkButton(
                         self.placeholder_container,
                         text=display,
-                        width=220,
                         height=28,
                         anchor="center",
                         fg_color="transparent",
                         hover_color=hover_color,
                         command=lambda name=raw: self._select_placeholder(name),
                     )
+
                     btn.pack(fill="x", padx=2, pady=1)
+                    # wrap long text on hover (show multiline) so full text is visible
+                    def _wrap_display(text, max_chars=40):
+                        words = text.split(" ")
+                        lines = []
+                        cur = ""
+                        for w in words:
+                            if not cur:
+                                cur = w
+                            elif len(cur) + 1 + len(w) <= max_chars:
+                                cur = cur + " " + w
+                            else:
+                                lines.append(cur)
+                                cur = w
+                        if cur:
+                            lines.append(cur)
+                        return "\n".join(lines)
+
+                    try:
+                        wrapped = _wrap_display(display, max_chars=40)
+                        # store originals
+                        btn._orig_text = display
+                        btn._wrapped_text = wrapped if wrapped != display else display
+
+                        def _on_enter(e, b=btn):
+                            try:
+                                if getattr(b, "_wrapped_text", "") != getattr(
+                                    b, "_orig_text", ""
+                                ):
+                                    b.configure(text=b._wrapped_text)
+                            except Exception:
+                                pass
+
+                        def _on_leave(e, b=btn):
+                            try:
+                                b.configure(text=b._orig_text)
+                            except Exception:
+                                pass
+
+                        btn.bind("<Enter>", _on_enter)
+                        btn.bind("<Leave>", _on_leave)
+                    except Exception:
+                        pass
                     try:
                         # double-click inserts the placeholder
                         btn.bind(
@@ -428,11 +560,19 @@ class TemplateEditor(ctk.CTkToplevel):
                             # default placeholders: show non-rename warning on right-click
                             btn.bind(
                                 "<Button-3>",
-                                lambda e: ctk_dialogs.ctk_message(
-                                    self,
-                                    "Info",
-                                    "Placeholders padrão não podem ser renomeados.",
-                                    kind="info",
+                                lambda e: (
+                                    self.dialogs.message(
+                                        "Info",
+                                        "Placeholders padrão não podem ser renomeados.",
+                                        kind="info",
+                                    )
+                                    if getattr(self, "dialogs", None)
+                                    else ctk_dialogs.ctk_message(
+                                        self,
+                                        "Info",
+                                        "Placeholders padrão não podem ser renomeados.",
+                                        kind="info",
+                                    )
                                 ),
                             )
                     except Exception:
@@ -470,9 +610,14 @@ class TemplateEditor(ctk.CTkToplevel):
         content = self.get_content().strip()
 
         if not name:
-            ctk_dialogs.ctk_message(
-                self, "Erro", "O nome do template não pode ser vazio.", kind="error"
-            )
+            if getattr(self, "dialogs", None):
+                self.dialogs.message(
+                    "Erro", "O nome do template não pode ser vazio.", kind="error"
+                )
+            else:
+                ctk_dialogs.ctk_message(
+                    self, "Erro", "O nome do template não pode ser vazio.", kind="error"
+                )
             return
 
         self.manager.save_template(self.original_name, name, content)
@@ -491,17 +636,29 @@ class TemplateEditor(ctk.CTkToplevel):
             or meta.is_protected(name)
             or meta.is_favorite(name)
         ):
-            ctk_dialogs.ctk_message(
-                self,
-                "Protegido",
-                "Este template está protegido ou favoritado e não pode ser excluído.",
-                kind="warning",
-            )
+            if getattr(self, "dialogs", None):
+                self.dialogs.message(
+                    "Protegido",
+                    "Este template está protegido ou favoritado e não pode ser excluído.",
+                    kind="warning",
+                )
+            else:
+                ctk_dialogs.ctk_message(
+                    self,
+                    "Protegido",
+                    "Este template está protegido ou favoritado e não pode ser excluído.",
+                    kind="warning",
+                )
             return
 
-        confirm = ctk_dialogs.ctk_ask_yes_no(
-            self, "Confirmação", f"Deseja excluir o template '{name}'?"
-        )
+        if getattr(self, "dialogs", None):
+            confirm = self.dialogs.ask_yes_no(
+                "Confirmação", f"Deseja excluir o template '{name}'?"
+            )
+        else:
+            confirm = ctk_dialogs.ctk_ask_yes_no(
+                self, "Confirmação", f"Deseja excluir o template '{name}'?"
+            )
         if confirm:
             self.manager.delete_template(name)
 
@@ -577,12 +734,19 @@ class TemplateEditor(ctk.CTkToplevel):
         if self.selected_placeholder in fixed:
             # silently ignore or show a small hint
             try:
-                ctk_dialogs.ctk_message(
-                    self,
-                    "Info",
-                    "Placeholders padrão não podem ser renomeados.",
-                    kind="info",
-                )
+                if getattr(self, "dialogs", None):
+                    self.dialogs.message(
+                        "Info",
+                        "Placeholders padrão não podem ser renomeados.",
+                        kind="info",
+                    )
+                else:
+                    ctk_dialogs.ctk_message(
+                        self,
+                        "Info",
+                        "Placeholders padrão não podem ser renomeados.",
+                        kind="info",
+                    )
             except Exception:
                 pass
             return
@@ -596,67 +760,318 @@ class TemplateEditor(ctk.CTkToplevel):
         phs = self.get_placeholders()
         if name in phs.get("fixed", []):
             try:
-                ctk_dialogs.ctk_message(
-                    self,
-                    "Info",
-                    "Placeholders padrão não podem ser renomeados.",
-                    kind="info",
-                )
+                if getattr(self, "dialogs", None):
+                    self.dialogs.message(
+                        "Info",
+                        "Placeholders padrão não podem ser renomeados.",
+                        kind="info",
+                    )
+                else:
+                    ctk_dialogs.ctk_message(
+                        self,
+                        "Info",
+                        "Placeholders padrão não podem ser renomeados.",
+                        kind="info",
+                    )
             except Exception:
                 pass
             return
-        # prompt
-        new_name = ctk_dialogs.ctk_ask_string(
-            self, "Renomear Campo", f"Novo nome para '{name}':", initial=name
-        )
-        if not new_name or new_name.strip() == name:
-            return
-        new_name = new_name.strip()
-        # Replace occurrences of the old placeholder in the current editor content
+        # show a dynamic CTk dialog allowing type selection and extra properties
         try:
+            # Prefer using the main window's _create_toplevel helper when available so
+            # ThemeManager can register the dialog for live theme updates.
+            parent_creator = getattr(
+                getattr(self, "master", None), "_create_toplevel", None
+            )
+            if callable(parent_creator):
+                dlg = parent_creator(self)
+            else:
+                dlg = ctk.CTkToplevel(self)
+                # If this editor has a ThemeManager available, register the dialog so
+                # it receives live theme updates.
+                try:
+                    if hasattr(self, "theme_manager") and self.theme_manager:
+                        try:
+                            self.theme_manager.register_window(dlg)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            dlg.title("Renomear Campo")
+            dlg.transient(self)
+            dlg.grab_set()
+            frm = ctk.CTkFrame(dlg)
+            frm.pack(padx=12, pady=12, fill="both", expand=True)
+
+            # sanitize incoming placeholder inner (without surrounding $)
+            inner = name
+            if inner.startswith("$") and inner.endswith("$"):
+                inner = inner[1:-1]
+
+            import re as _re
+            mo = _re.match(r"^(?:\[(?P<ptype>[^\]]+)\])?(?P<label>[^\(|\||\?]+)(?P<suffix>.*)$", inner)
+            p_full = None
+            orig_label = inner
+            orig_suffix = ""
+            if mo:
+                p_full = mo.group("ptype")
+                orig_label = (mo.group("label") or "").strip()
+                orig_suffix = (mo.group("suffix") or "").strip()
+
+            ctk.CTkLabel(frm, text=f"Renomear '{orig_label}'", anchor="w").pack(fill="x", pady=(0, 8))
+            # new label (only the pure name, do not include type)
+            ctk.CTkLabel(frm, text="Novo nome:").pack(anchor="w")
+            new_label_var = ctk.StringVar(value=orig_label)
+            new_label_entry = ctk.CTkEntry(frm, textvariable=new_label_var)
+            new_label_entry.pack(fill="x", pady=(0, 8))
+
+            # type selector
+            types = ["entry", "checkbox", "switch", "radio", "dropdown", "text", "date"]
+            # map p_full to simple current type
+            current_ptype = "entry"
+            if p_full:
+                if p_full.startswith("radio"):
+                    current_ptype = "radio"
+                elif p_full.startswith("dropdown"):
+                    current_ptype = "dropdown"
+                elif p_full.startswith("checkbox"):
+                    current_ptype = "checkbox"
+                elif p_full.startswith("switch"):
+                    current_ptype = "switch"
+                else:
+                    current_ptype = "entry"
+
+            ctk.CTkLabel(frm, text="Tipo:").pack(anchor="w")
+            type_var = ctk.StringVar(value=current_ptype)
+            type_menu = ctk.CTkOptionMenu(frm, values=types, variable=type_var)
+            type_menu.pack(fill="x", pady=(0, 8))
+
+            # dynamic frames for extra options
+            extra_frame = ctk.CTkFrame(frm)
+            extra_frame.pack(fill="x", pady=(4, 0))
+
+            # checkbox options
+            chk_checked = ctk.StringVar(value="Sim")
+            chk_unchecked = ctk.StringVar(value="Não")
+            chk_frame = ctk.CTkFrame(extra_frame)
+            ctk.CTkLabel(chk_frame, text="Checked:").pack(anchor="w")
+            ctk.CTkEntry(chk_frame, textvariable=chk_checked).pack(fill="x", pady=(0, 4))
+            ctk.CTkLabel(chk_frame, text="Unchecked:").pack(anchor="w")
+            ctk.CTkEntry(chk_frame, textvariable=chk_unchecked).pack(fill="x")
+
+            # radio/dropdown options
+            radio_opts_var = ctk.StringVar(value="")
+            rd_frame = ctk.CTkFrame(extra_frame)
+            ctk.CTkLabel(rd_frame, text="Opções (separadas por vírgula):").pack(anchor="w")
+            ctk.CTkEntry(rd_frame, textvariable=radio_opts_var).pack(fill="x")
+
+            # switch default
+            switch_default = ctk.StringVar(value="on")
+            sw_frame = ctk.CTkFrame(extra_frame)
+            ctk.CTkLabel(sw_frame, text="Estado padrão:").pack(anchor="w")
+            sw_menu = ctk.CTkOptionMenu(sw_frame, values=["on", "off"], variable=switch_default)
+            sw_menu.pack(fill="x")
+
+            # text default
+            txt_default = ctk.StringVar(value="")
+            txt_frame = ctk.CTkFrame(extra_frame)
+            ctk.CTkLabel(txt_frame, text="Valor padrão:").pack(anchor="w")
+            ctk.CTkEntry(txt_frame, textvariable=txt_default).pack(fill="x")
+
+            # initialize extras from existing p_full / suffix when possible
+            try:
+                # radio/dropdown options encoded in p_full after ':'
+                if p_full and (p_full.startswith("radio") or p_full.startswith("dropdown")):
+                    if ":" in p_full:
+                        opts = p_full.split(":", 1)[1]
+                        radio_opts_var.set(opts.replace("|", ","))
+                # checkbox suffix pattern: ?checked|unchecked
+                if orig_suffix.startswith("?"):
+                    parts = orig_suffix.lstrip("?").split("|")
+                    if parts:
+                        chk_checked.set(parts[0])
+                    if len(parts) > 1:
+                        chk_unchecked.set(parts[1])
+                # switch suffix: |on or |off
+                if orig_suffix.startswith("|") and current_ptype == "switch":
+                    sw = orig_suffix.lstrip("|")
+                    if sw:
+                        switch_default.set(sw)
+                # text/default entry: |value
+                if orig_suffix.startswith("|") and current_ptype in ("text", "entry", "date"):
+                    txt_default.set(orig_suffix.lstrip("|"))
+            except Exception:
+                pass
+
+            # helper to show only relevant frame
+            def _show_extra():
+                for f in (chk_frame, rd_frame, sw_frame, txt_frame):
+                    try:
+                        f.pack_forget()
+                    except Exception:
+                        pass
+                t = type_var.get()
+                if t == "checkbox":
+                    chk_frame.pack(fill="x")
+                elif t in ("radio", "dropdown"):
+                    rd_frame.pack(fill="x")
+                elif t == "switch":
+                    sw_frame.pack(fill="x")
+                else:
+                    txt_frame.pack(fill="x")
+
+            type_var.trace_add("write", lambda *_: _show_extra())
+            _show_extra()
+
+            # buttons
+            bframe = ctk.CTkFrame(frm)
+            bframe.pack(pady=(8, 0))
+
+            result = {"ok": False}
+
+            def on_ok():
+                result["ok"] = True
+                dlg.destroy()
+
+            def on_cancel():
+                result["ok"] = False
+                dlg.destroy()
+
+            ctk.CTkButton(bframe, text="OK", command=on_ok).pack(side="left", padx=6)
+            ctk.CTkButton(bframe, text="Cancelar", command=on_cancel).pack(side="left", padx=6)
+            new_label_entry.focus()
+            dlg.wait_window()
+
+            if not result.get("ok"):
+                return
+
+            new_label = new_label_var.get().strip()
+            new_type = type_var.get()
+            # build bracket content and suffix according to type and options
+            bracket = None
+            suffix = ""
+            if new_type == "radio":
+                opts = [o.strip() for o in (radio_opts_var.get() or "").replace("|", ",").split(",") if o.strip()]
+                if opts:
+                    bracket = "radio:" + "|".join(opts)
+            elif new_type == "dropdown":
+                opts = [o.strip() for o in (radio_opts_var.get() or "").replace("|", ",").split(",") if o.strip()]
+                if opts:
+                    bracket = "dropdown:" + "|".join(opts)
+            elif new_type == "checkbox":
+                bracket = "checkbox"
+                c1 = chk_checked.get().strip()
+                c2 = chk_unchecked.get().strip()
+                if c1 or c2:
+                    suffix = f"?{c1 or 'Sim'}|{c2 or 'Não'}"
+            elif new_type == "switch":
+                bracket = "switch"
+                sd = switch_default.get()
+                if sd:
+                    suffix = f"|{sd}"
+            elif new_type in ("text", "entry", "date"):
+                # no bracket, only default value if provided
+                val = txt_default.get().strip()
+                if val:
+                    suffix = f"|{val}"
+
+            # construct inner token (without surrounding $)
+            inner_parts = []
+            if bracket:
+                inner_parts.append(f"[{bracket}]")
+            inner_parts.append(new_label)
+            inner_parts.append(suffix)
+            new_inner = "".join(inner_parts)
+
+            # Replace matches in content where the visible label equals the old label
             import re
 
-            def _replace_match(m):
-                inner = m.group(1)
-                # determine canonical candidate name used by extract_placeholders
-                if "?" in inner and "|" in inner:
-                    candidate = inner.split("?", 1)[0].strip()
-                else:
-                    candidate = inner.strip()
-                # if bracketed type present, the visible label may be after the closing bracket
-                if inner.startswith("[") and "]" in inner:
-                    label_after = inner[inner.index("]") + 1 :].strip()
-                    if (
-                        label_after == name
-                        or inner.strip() == name
-                        or candidate == name
-                    ):
-                        ptype_section = inner[1 : inner.index("]")].strip()
-                        return f"${'[' + ptype_section + ']' + new_name}$"
-                if candidate == name or inner.strip() == name:
-                    # preserve trailing args/defaults
-                    if inner.startswith(name):
-                        suffix = inner[len(name) :]
-                        return f"${new_name}{suffix}$"
-                    return f"${inner.replace(name, new_name, 1)}$"
+            old_label = orig_label
+            old_inner = inner
+
+            def _replace_match_full(m):
+                inner_here = m.group(1)
+                mo2 = re.match(r"^(?:\[(?P<ptype>[^\]]+)\])?(?P<label>[^\(|\||\?]+)(?P<suffix>.*)$", inner_here)
+                if not mo2:
+                    return m.group(0)
+                label_here = (mo2.group("label") or "").strip()
+                if label_here == old_label:
+                    return f"${new_inner}$"
                 return m.group(0)
 
             content = self.get_content()
-            new_content = re.sub(r"\$([^\$]+)\$", _replace_match, content)
+            new_content = re.sub(r"\$([^\$]+)\$", _replace_match_full, content)
             if new_content != content:
                 try:
                     self.content_box.delete("1.0", "end")
                     self.content_box.insert("1.0", new_content)
                 except Exception:
                     pass
+            # ensure manager is informed with inner forms (without $)
+            new_name = new_inner
+            name = old_inner
         except Exception:
-            pass
+            # fallback: simple prompt
+            try:
+                if getattr(self, "dialogs", None):
+                    new_name = self.dialogs.ask_string(
+                        "Renomear Campo", f"Novo nome para '{name}':", initial=name
+                    )
+                else:
+                    new_name = ctk_dialogs.ctk_ask_string(
+                        self,
+                        "Renomear Campo",
+                        f"Novo nome para '{name}':",
+                        initial=name,
+                    )
+                if not new_name or new_name.strip() == name:
+                    return
+                new_name = new_name.strip()
+                import re as _re
+                new_name = _re.sub(r"^\s*\[[^\]]+\]\s*", "", new_name)
+                # basic replacement preserving type if present
+                import re
+
+                def _replace_simple(m):
+                    inner = m.group(1)
+                    mo = re.match(r"^(?:\[(?P<ptype>[^\]]+)\])?(?P<label>[^\(|\||\?]+)(?P<suffix>.*)$", inner)
+                    if not mo:
+                        return m.group(0)
+                    label = (mo.group("label") or "").strip()
+                    ptype = mo.group("ptype")
+                    suffix = mo.group("suffix") or ""
+                    if label == name:
+                        parts = []
+                        if ptype:
+                            parts.append(f"[{ptype}]")
+                        parts.append(new_name)
+                        parts.append(suffix)
+                        return f"${''.join(parts)}$"
+                    return m.group(0)
+
+                content = self.get_content()
+                new_content = re.sub(r"\$([^\$]+)\$", _replace_simple, content)
+                if new_content != content:
+                    try:
+                        self.content_box.delete("1.0", "end")
+                        self.content_box.insert("1.0", new_content)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         # try manager methods first
         try:
+            # ensure we pass inner forms (without surrounding $) to manager
+            old_inner_val = name
+            try:
+                if old_inner_val.startswith("$") and old_inner_val.endswith("$"):
+                    old_inner_val = old_inner_val[1:-1]
+            except Exception:
+                pass
             if hasattr(self.manager, "rename_placeholder"):
-                self.manager.rename_placeholder(name, new_name)
+                self.manager.rename_placeholder(old_inner_val, new_name)
             elif hasattr(self.manager, "rename_field"):
-                self.manager.rename_field(name, new_name)
+                self.manager.rename_field(old_inner_val, new_name)
             else:
                 # fallback: try to add the new dynamic field via master and remove old
                 parent = getattr(self, "master", None)
@@ -673,9 +1088,14 @@ class TemplateEditor(ctk.CTkToplevel):
                         except Exception:
                             pass
         except Exception as e:
-            ctk_dialogs.ctk_message(
-                self, "Erro", f"Falha ao renomear campo: {e}", kind="error"
-            )
+            if getattr(self, "dialogs", None):
+                self.dialogs.message(
+                    "Erro", f"Falha ao renomear campo: {e}", kind="error"
+                )
+            else:
+                ctk_dialogs.ctk_message(
+                    self, "Erro", f"Falha ao renomear campo: {e}", kind="error"
+                )
             return
         # refresh placeholder list to reflect changes
         try:
@@ -710,12 +1130,14 @@ class TemplateEditor(ctk.CTkToplevel):
         if not real:
             return
         # prompt initial should be the real internal name (without symbols)
-        new_display = ctk_dialogs.ctk_ask_string(
-            self,
-            "Renomear",
-            "Novo nome do template:",
-            initial=real,
-        )
+        if getattr(self, "dialogs", None):
+            new_display = self.dialogs.ask_string(
+                "Renomear", "Novo nome do template:", initial=real
+            )
+        else:
+            new_display = ctk_dialogs.ctk_ask_string(
+                self, "Renomear", "Novo nome do template:", initial=real
+            )
         if not new_display:
             return
         # sanitize: remove leading display symbols if user pasted them
@@ -732,12 +1154,19 @@ class TemplateEditor(ctk.CTkToplevel):
             canonical = self.manager.meta._canonical_name(new_display)
             existing = self.manager.get_template_names()
             if canonical in existing and canonical != real:
-                ctk_dialogs.ctk_message(
-                    self,
-                    "Erro",
-                    f"Já existe um template com o nome '{new_display}'.",
-                    kind="error",
-                )
+                if getattr(self, "dialogs", None):
+                    self.dialogs.message(
+                        "Erro",
+                        f"Já existe um template com o nome '{new_display}'.",
+                        kind="error",
+                    )
+                else:
+                    ctk_dialogs.ctk_message(
+                        self,
+                        "Erro",
+                        f"Já existe um template com o nome '{new_display}'.",
+                        kind="error",
+                    )
                 return
         except Exception:
             pass
@@ -758,9 +1187,14 @@ class TemplateEditor(ctk.CTkToplevel):
                 except Exception:
                     pass
         except Exception as e:
-            ctk_dialogs.ctk_message(
-                self, "Erro", f"Falha ao renomear template: {e}", kind="error"
-            )
+            if getattr(self, "dialogs", None):
+                self.dialogs.message(
+                    "Erro", f"Falha ao renomear template: {e}", kind="error"
+                )
+            else:
+                ctk_dialogs.ctk_message(
+                    self, "Erro", f"Falha ao renomear template: {e}", kind="error"
+                )
             return
         # refresh UI and select the renamed template in this editor
         try:
@@ -795,7 +1229,12 @@ class TemplateEditor(ctk.CTkToplevel):
 
     def create_new_template(self):
         """Create a new empty template and open it for editing."""
-        new_name = ctk_dialogs.ctk_ask_string(self, "Novo", "Nome do novo template:")
+        if getattr(self, "dialogs", None):
+            new_name = self.dialogs.ask_string("Novo", "Nome do novo template:")
+        else:
+            new_name = ctk_dialogs.ctk_ask_string(
+                self, "Novo", "Nome do novo template:"
+            )
         if not new_name:
             return
         try:
@@ -830,29 +1269,49 @@ class TemplateEditor(ctk.CTkToplevel):
                     # main window will handle the import flow; refresh selectors afterward
                     self.refresh_templates()
                 except Exception as e:
-                    ctk_dialogs.ctk_message(
-                        self, "Erro", f"Falha ao abrir NocoDB: {e}", kind="error"
-                    )
+                    if getattr(self, "dialogs", None):
+                        self.dialogs.message(
+                            "Erro", f"Falha ao abrir NocoDB: {e}", kind="error"
+                        )
+                    else:
+                        ctk_dialogs.ctk_message(
+                            self, "Erro", f"Falha ao abrir NocoDB: {e}", kind="error"
+                        )
             elif hasattr(self.manager, "import_from_nocodb"):
                 self.manager.import_from_nocodb()
-                ctk_dialogs.ctk_message(
-                    self,
-                    "Importado",
-                    "Importação via NocoDB concluída.",
-                    kind="success",
-                )
+                if getattr(self, "dialogs", None):
+                    self.dialogs.message(
+                        "Importado", "Importação via NocoDB concluída.", kind="success"
+                    )
+                else:
+                    ctk_dialogs.ctk_message(
+                        self,
+                        "Importado",
+                        "Importação via NocoDB concluída.",
+                        kind="success",
+                    )
                 self.refresh_templates()
             else:
-                ctk_dialogs.ctk_message(
-                    self,
-                    "Não disponível",
-                    "Importação NocoDB não está configurada.",
-                    kind="warning",
-                )
+                if getattr(self, "dialogs", None):
+                    self.dialogs.message(
+                        "Não disponível",
+                        "Importação NocoDB não está configurada.",
+                        kind="warning",
+                    )
+                else:
+                    ctk_dialogs.ctk_message(
+                        self,
+                        "Não disponível",
+                        "Importação NocoDB não está configurada.",
+                        kind="warning",
+                    )
         except Exception as e:
-            ctk_dialogs.ctk_message(
-                self, "Erro", f"Falha na importação: {e}", kind="error"
-            )
+            if getattr(self, "dialogs", None):
+                self.dialogs.message("Erro", f"Falha na importação: {e}", kind="error")
+            else:
+                ctk_dialogs.ctk_message(
+                    self, "Erro", f"Falha na importação: {e}", kind="error"
+                )
 
     def toggle_favorite(self):
         real = self.get_real_name()
@@ -862,12 +1321,19 @@ class TemplateEditor(ctk.CTkToplevel):
     def toggle_protected(self):
         real = self.get_real_name()
         if self.manager.meta.is_favorite(real):
-            ctk_dialogs.ctk_message(
-                self,
-                "Aviso",
-                "Templates favoritos já são protegidos automaticamente.",
-                kind="info",
-            )
+            if getattr(self, "dialogs", None):
+                self.dialogs.message(
+                    "Aviso",
+                    "Templates favoritos já são protegidos automaticamente.",
+                    kind="info",
+                )
+            else:
+                ctk_dialogs.ctk_message(
+                    self,
+                    "Aviso",
+                    "Templates favoritos já são protegidos automaticamente.",
+                    kind="info",
+                )
             return
         self.manager.meta.toggle_protected(real)
         self.refresh_templates()
@@ -886,7 +1352,21 @@ class TemplateEditor(ctk.CTkToplevel):
         # close any existing autocomplete popup first
         self._close_autocomplete()
 
-        popup = ctk.CTkToplevel(self)
+        parent_creator = getattr(
+            getattr(self, "master", None), "_create_toplevel", None
+        )
+        if callable(parent_creator):
+            popup = parent_creator(self)
+        else:
+            popup = ctk.CTkToplevel(self)
+            try:
+                if hasattr(self, "theme_manager") and self.theme_manager:
+                    try:
+                        self.theme_manager.register_window(popup)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         popup.transient(self)
         popup.grab_set()
         popup.geometry("+%d+%d" % (self.winfo_rootx() + 200, self.winfo_rooty() + 200))
@@ -911,17 +1391,16 @@ class TemplateEditor(ctk.CTkToplevel):
                     pass
                 self._close_autocomplete()
 
-            btn = ctk.CTkButton(
-                frame,
-                text=f"${ph}$",
-                width=180,
-                height=26,
-                font=ctk.CTkFont(size=11),
-                fg_color="transparent",
-                anchor="center",
-                command=insert,
-            )
-            btn.pack(pady=1)
+                btn = ctk.CTkButton(
+                    frame,
+                    text=f"${ph}$",
+                    height=26,
+                    font=ctk.CTkFont(size=11),
+                    fg_color="transparent",
+                    anchor="center",
+                    command=insert,
+                )
+                btn.pack(pady=1)
 
         # if the user types after the popup is open, close suggestions
         try:
@@ -953,7 +1432,21 @@ class TemplateEditor(ctk.CTkToplevel):
             )
         )
 
-        dlg = ctk.CTkToplevel(self)
+        parent_creator = getattr(
+            getattr(self, "master", None), "_create_toplevel", None
+        )
+        if callable(parent_creator):
+            dlg = parent_creator(self)
+        else:
+            dlg = ctk.CTkToplevel(self)
+            try:
+                if hasattr(self, "theme_manager") and self.theme_manager:
+                    try:
+                        self.theme_manager.register_window(dlg)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         dlg.title("Inserir Campo")
         dlg.geometry("420x320")
         dlg.transient(self)
@@ -990,7 +1483,6 @@ class TemplateEditor(ctk.CTkToplevel):
                 btn = ctk.CTkButton(
                     scroll,
                     text=p,
-                    width=200,
                     height=28,
                     anchor="center",
                     fg_color="transparent",

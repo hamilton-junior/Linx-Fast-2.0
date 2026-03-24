@@ -1,1 +1,4 @@
 Descrição de exemplo buscada diretamente da API para testes.
+
+
+$[dropdown:poggers|lmao|eksdee]teste$

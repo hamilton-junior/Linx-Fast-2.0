@@ -13,4 +13,4 @@ if __name__ == "__main__":
         app.mainloop()
     except Exception:
         logger.exception("Erro fatal na aplicação:")
-        raise
+        raiseapp.py 
