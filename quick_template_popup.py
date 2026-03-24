@@ -1,14 +1,9 @@
-import json
-import logging
-import os
-import re
-
 import customtkinter as ctk
-import pyperclip
 from tkinter import StringVar
 from tkinter import messagebox
-
+from app import TemplateApp
 from theme_manager import ThemeManager
+import logging
 from logger_config import auto_log_functions
 
 # Get the module logger
@@ -34,9 +29,9 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         self.app = master
 
         # Configura logging
-        if not hasattr(master, "show_snackbar") or not hasattr(master, "template_manager"):
+        if not isinstance(master, TemplateApp):
             logging.warning(
-                "QuickTemplatePopup master não exponde a interface esperada do TemplateApp."
+                "QuickTemplatePopup master não é um TemplateApp, algumas funções de UI podem não funcionar."
             )
 
         logging.info("Iniciando QuickTemplatePopup...")
@@ -188,7 +183,11 @@ class QuickTemplatePopup(ctk.CTkToplevel):
     def load_template(self, template_name):
         """Carrega o template selecionado e configura os campos dinamicamente"""
         logger.info(f"Carregando template: {template_name}")
-        from main_window import placeholder_engine  # Importa aqui para evitar import circular
+        from main_window import (
+            placeholder_engine,
+        )  # Importa aqui para evitar import circular
+        import json
+        import os
 
         logging.info(f"Carregando template '{template_name}' no Modo Simples...")
 
@@ -260,6 +259,7 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         # Campos fixos sempre primeiro, na ordem padrão, depois os dinâmicos na ordem salva
         used_fields = fixed_present + dynamic_ordered
 
+        import re
 
         def detect_field_type(name):
             field_type = "entry"
@@ -601,9 +601,11 @@ class QuickTemplatePopup(ctk.CTkToplevel):
 
     def copy_template(self):
         """Processa o template com os valores dos campos e copia para o clipboard"""
-        from main_window import placeholder_engine, TemplateApp as _App
-        # Reutiliza process_conditionals do TemplateApp para evitar duplicação
-        process_conditionals = _App.process_conditionals
+        from main_window import (
+            placeholder_engine,
+        )  # Importa aqui para evitar import circular
+
+        logging.info("Copiando template processado para o clipboard...")
 
         template_name = self.template_var.get()
         if not template_name:
@@ -631,10 +633,22 @@ class QuickTemplatePopup(ctk.CTkToplevel):
                 value = str(entry.get())
             field_values[key] = value
 
-        logging.debug("Template copiado com sucesso para o clipboard")
-
         # 2. Processa lógica condicional no template
-        content = process_conditionals(self, content, field_values)
+        def process_conditionals(template, field_values):
+            import re
+
+            def cond_repl(match):
+                field = match.group(1)
+                true_val = match.group(2)
+                false_val = match.group(3)
+                val = field_values.get(field, "")
+                # Valores considerados como verdadeiro
+                val_lower = str(val).lower()
+                return true_val if val_lower in {"sim", "true", "1"} else false_val
+
+            return re.sub(r"\$([^\$?]+)\?([^\|$]+)\|([^\$]+)\$", cond_repl, template)
+
+        content = process_conditionals(content, field_values)
 
         # 3. Substitui placeholders simples
         for key, value in field_values.items():
@@ -642,6 +656,8 @@ class QuickTemplatePopup(ctk.CTkToplevel):
 
         # 4. Substitui placeholders automáticos/dinâmicos
         content = placeholder_engine.process(content)
+
+        import pyperclip
 
         pyperclip.copy(content)
         logging.debug("Template copiado com sucesso para o clipboard")
@@ -680,6 +696,8 @@ class QuickTemplatePopup(ctk.CTkToplevel):
         for key, entry in self.entries.items():
             value = entry.get()
             content = content.replace(f"${key}$", value or "")
+
+        import pyperclip
 
         pyperclip.copy(content)
         self.destroy()

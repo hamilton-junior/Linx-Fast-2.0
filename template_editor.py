@@ -83,6 +83,13 @@ class TemplateEditor(ctk.CTkToplevel):
             row=1, column=0, columnspan=4, sticky="nsew", padx=10, pady=(5, 5)
         )
         self.content_box.bind("<Control-space>", self.show_autocomplete)
+        self.content_box.bind("<KeyRelease>", self._schedule_highlight)
+        
+        # Configurar TAGS de destaque (estilo moderno)
+        self.content_box._textbox.tag_config("variable", foreground="#a06cd5") # Roxo para variáveis
+        self.content_box._textbox.tag_config("conditional", foreground="#3a86ff") # Azul para condicionais
+        self.content_box._textbox.tag_config("bracket", foreground="#ff006e") # Rosa para colchetes [checkbox]
+
 
         # Botão de importar do NocoDB acima da lista de variáveis (pequeno, igual aos outros)
         ctk.CTkButton(
@@ -203,6 +210,41 @@ class TemplateEditor(ctk.CTkToplevel):
         ctk.CTkButton(btn_frame, text="Cancelar", command=popup.destroy).pack(
             side="left", padx=10
         )
+
+    def _schedule_highlight(self, event=None):
+        if hasattr(self, "_highlight_timer"):
+            self.after_cancel(self._highlight_timer)
+        self._highlight_timer = self.after(300, self._highlight_variables)
+
+    def _highlight_variables(self):
+        """Destaque básico de sintaxe para variáveis no textbox"""
+        try:
+            content = self.content_box.get("1.0", "end")
+            self.content_box._textbox.tag_remove("variable", "1.0", "end")
+            self.content_box._textbox.tag_remove("conditional", "1.0", "end")
+            self.content_box._textbox.tag_remove("bracket", "1.0", "end")
+
+            import re
+            
+            # Highlight $variables$
+            for match in re.finditer(r"\$[^\$\n\?]+\$", content):
+                start = f"1.0 + {match.start()} chars"
+                end = f"1.0 + {match.end()} chars"
+                self.content_box._textbox.tag_add("variable", start, end)
+
+            # Highlight $[conditional]?$
+            for match in re.finditer(r"\$[^\$\n]+\?[^\$\n]+\$", content):
+                start = f"1.0 + {match.start()} chars"
+                end = f"1.0 + {match.end()} chars"
+                self.content_box._textbox.tag_add("conditional", start, end)
+
+            # Highlight [type]
+            for match in re.finditer(r"\[(checkbox|switch|list:[^\]]+)\]", content):
+                start = f"1.0 + {match.start()} chars"
+                end = f"1.0 + {match.end()} chars"
+                self.content_box._textbox.tag_add("bracket", start, end)
+        except Exception:
+            pass
 
     def load_template(self, name):
         content = self.manager.get_template(name)

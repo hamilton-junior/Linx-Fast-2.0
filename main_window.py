@@ -12,17 +12,23 @@ from template_manager import TemplateManager
 from theme_manager import ThemeManager
 from dpm import DailyPasswordManager
 from settings_window import SettingsWindow
-from settings_manager import load_config, save_config
+from settings_manager import load_config
 from customtkinter import CTkInputDialog
 from logger_config import auto_log_functions
 
-# Module logger
-logger = logging.getLogger("main_window")
+# Get the module logger
+logger = logging.getLogger(__name__)
 
 try:
     from version import VERSION, COMMIT, BUILD_DATE
 except ImportError:
     VERSION, COMMIT, BUILD_DATE = "dev", "dev", "dev"
+
+# Configure logger for this module
+logger = logging.getLogger("main_window")
+
+# Define quais símbolos são exportados
+__all__ = ["TemplateApp", "placeholder_engine"]
 
 
 # --- PlaceholderEngine e instância global ---
@@ -116,16 +122,14 @@ class TemplateApp(ctk.CTk):
         self.visual_feedback_enabled = True
         self._after_ids = set()  # IDs dos afters agendados
 
-        # Load persistent config once
+        # Carrega config de campos expansíveis
+        self.expandable_fields = self.load_expandable_fields_config()
+
+        # Load persistent config (used for field definitions and other settings)
         try:
             self.config = load_config()
         except Exception:
             self.config = {}
-
-        # Carrega config de campos expansíveis (usa config já carregado)
-        self.expandable_fields = self.config.get(
-            "expandable_fields", ["Procedimento Executado", "Problema Relatado"]
-        )
 
         # Inicializar o ThemeManager primeiro (ele será usado por outras janelas)
         self.theme_name = self.config.get("theme", "Linx")
@@ -140,6 +144,11 @@ class TemplateApp(ctk.CTk):
 
         # Inicialização das outras classes
         self.template_manager = TemplateManager()
+        # Load persistent config (used for field definitions and other settings)
+        try:
+            self.config = load_config()
+        except Exception:
+            self.config = {}
         self.password_manager = DailyPasswordManager()
         self.fixed_fields = [
             "Nome",
@@ -172,6 +181,20 @@ class TemplateApp(ctk.CTk):
 
         self._safe_after(0, self.apply_saved_geometry)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        # Atalhos Globais de Produtividade
+        self.bind_all("<Control-Return>", lambda e: self.copy_to_clipboard())
+        self.bind_all("<Control-d>", lambda e: self.clear_all_fields())
+        self.bind_all("<Control-D>", lambda e: self.clear_all_fields())
+        self.bind_all("<Control-k>", lambda e: self._focus_selector())
+        self.bind_all("<Control-K>", lambda e: self._focus_selector())
+
+    def _focus_selector(self):
+        """Atalho Ctrl+K para focar no seletor e abrir o menu."""
+        if hasattr(self, "template_selector"):
+            self.template_selector.focus_set()
+        return "break"
+
 
     def _build_main_interface(self):
         self.main_frame = ctk.CTkFrame(self)
@@ -1844,6 +1867,29 @@ class TemplateApp(ctk.CTk):
                             f"Erro ao restaurar valor {valor_antigo} para {k}: {e}"
                         )
         # Se não houver valor antigo, deixa vazio para mostrar o placeholder
+
+        
+        # Foco automático no primeiro campo (Produtividade)
+        self._focus_first_field()
+
+    def _focus_first_field(self):
+        """Foca no primeiro campo disponível seguindo a ordem visual."""
+        if not self.entries:
+            return
+        
+        # Prioridade para campos fixos, depois dinâmicos
+        order = self.fixed_fields + self.dynamic_fields
+        for key in order:
+            widget = self.entries.get(key)
+            if widget and hasattr(widget, "focus_set"):
+                try:
+                    widget.focus_set()
+                    if hasattr(widget, "icursor"):
+                        widget.icursor("end")
+                    break
+                except Exception:
+                    continue
+
 
     def open_template_editor(self):
         def get_fields():
@@ -3996,45 +4042,79 @@ class TemplateApp(ctk.CTk):
 
         self._safe_after(500, restore)
 
-    def save_window_config(self) -> None:
-        """Persist the current window geometry to config.json."""
+    def save_window_config(self):
         self.update_idletasks()
-        if self.winfo_height() >= 300:
+        width, height = self.winfo_width(), self.winfo_height()
+
+        if height >= 300:
+            geometry_str = self.geometry()
+
             try:
-                cfg = load_config()
-                cfg["geometry"] = self.geometry()
-                save_config(cfg)
+                # Carrega o config existente, se houver
+                if os.path.exists("config.json"):
+                    with open("config.json", "r", encoding="utf-8") as f:
+                        config = json.load(f)
+                else:
+                    config = {}
+
+                # Atualiza a geometria
+                config["geometry"] = geometry_str
+
+                # Salva o arquivo atualizado
+                with open("config.json", "w", encoding="utf-8") as f:
+                    json.dump(config, f)
+
             except Exception as e:
-                logger.error("Erro ao salvar geometria: %s", e)
+                print(f"[ERRO ao salvar config]: {e}")
 
-    def load_window_config(self) -> None:
-        """Restore window geometry from config.json (deprecated – prefer apply_saved_geometry)."""
-        self.apply_saved_geometry()
-
-    def apply_saved_geometry(self) -> None:
-        """Apply the persisted window geometry, if any."""
+    def load_window_config(self):
         try:
-            geometry = load_config().get("geometry")
-            if geometry and "x" in geometry:
-                self.geometry(geometry)
+            with open("config.json", "r", encoding="utf-8") as f:
+                config = json.load(f)
+                geometry = config.get("geometry")
+                if geometry and "x" in geometry:
+                    self.geometry(geometry)
+        except Exception:
+            pass
+
+    def apply_saved_geometry(self):
+        try:
+            with open("config.json", "r", encoding="utf-8") as f:
+                config = json.load(f)
+                geometry = config.get("geometry")
+                if geometry and "x" in geometry:
+                    self.geometry(geometry)
         except Exception:
             pass
 
     # --- Configuração de campos expansíveis ---
-    def load_expandable_fields_config(self) -> list:
-        """Return the list of expandable field names from config."""
-        return load_config().get(
-            "expandable_fields", ["Procedimento Executado", "Problema Relatado"]
-        )
+    def load_expandable_fields_config(self):
+        import json
 
-    def save_expandable_fields_config(self) -> None:
-        """Persist the current expandable_fields list to config.json."""
-        try:
-            cfg = load_config()
-            cfg["expandable_fields"] = self.expandable_fields
-            save_config(cfg)
-        except Exception as e:
-            logger.error("Erro ao salvar expandable_fields: %s", e)
+        if os.path.exists("config.json"):
+            try:
+                with open("config.json", "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                return config.get(
+                    "expandable_fields", ["Procedimento Executado", "Problema Relatado"]
+                )
+            except Exception:
+                return ["Procedimento Executado", "Problema Relatado"]
+        return ["Procedimento Executado", "Problema Relatado"]
+
+    def save_expandable_fields_config(self):
+        import json
+
+        config = {}
+        if os.path.exists("config.json"):
+            try:
+                with open("config.json", "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+        config["expandable_fields"] = self.expandable_fields
+        with open("config.json", "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4)
 
     def open_settings(self):
         # Permite apenas uma janela de configurações por vez
@@ -4150,23 +4230,34 @@ class TemplateApp(ctk.CTk):
                         f"Erro ao restaurar valor {valor_antigo} para {k}: {e}"
                     )
 
-    def load_theme_config(self) -> tuple:
-        """Return (theme_name, appearance_mode) from config.json."""
-        try:
-            cfg = load_config()
-            return cfg.get("theme_name", "green"), cfg.get("appearance_mode", "dark")
-        except Exception:
-            return "green", "dark"
+    def load_theme_config(self):
+        import json
 
-    def save_theme_config(self, theme_name: str, appearance_mode: str) -> None:
-        """Persist theme settings to config.json."""
-        try:
-            cfg = load_config()
-            cfg["theme_name"] = theme_name
-            cfg["appearance_mode"] = appearance_mode
-            save_config(cfg)
-        except Exception as e:
-            logger.error("Erro ao salvar tema: %s", e)
+        if os.path.exists("config.json"):
+            try:
+                with open("config.json", "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                theme = config.get("theme_name", "green")
+                mode = config.get("appearance_mode", "dark")
+                return theme, mode
+            except Exception:
+                return "green", "dark"
+        return "green", "dark"
+
+    def save_theme_config(self, theme_name, appearance_mode):
+        import json
+
+        config = {}
+        if os.path.exists("config.json"):
+            try:
+                with open("config.json", "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+        config["theme_name"] = theme_name
+        config["appearance_mode"] = appearance_mode
+        with open("config.json", "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4)
 
     def _safe_after(self, delay, callback):
         """Agende um after e registre o ID para cancelamento seguro."""
