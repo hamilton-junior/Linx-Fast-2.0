@@ -236,7 +236,15 @@ class TemplateApp(ctk.CTk):
         self.template_selector.bind("<Up>", lambda e: self._navigate_templates(-1))
         self.template_selector.bind("<Down>", lambda e: self._navigate_templates(1))
         for i in range(1, 10):
+            # No seletor (com foco), números puros funcionam
+            self.bind_all(f"<Key-{i}>", lambda e, idx=i-1: self._select_if_focused(idx))
+            self.bind_all(f"<KP_{i}>", lambda e, idx=i-1: self._select_if_focused(idx))
+            # Globalmente, Alt + Número sempre funciona
             self.bind_all(f"<Alt-Key-{i}>", lambda e, idx=i-1: self._select_template_by_idx(idx))
+            self.bind_all(f"<Alt-KP_{i}>", lambda e, idx=i-1: self._select_template_by_idx(idx))
+
+
+
 
         # Botão de Configurações ao lado do seletor de template
         self.settings_button = ctk.CTkButton(
@@ -1956,7 +1964,24 @@ class TemplateApp(ctk.CTk):
             self.template_selector.set(values[0])
             self.on_template_change(values[0])
 
+    def _select_if_focused(self, idx):
+        """Seleciona template se o foco estiver no seletor ou no menu suspenso (Toplevel)."""
+        f = self.focus_get()
+        if not f: return
+        
+        f_str = str(f).lower()
+        # CustomTkinter abre o menu em um CTkToplevel. Verificamos se o foco está lá ou no seletor.
+        if (f == self.template_selector or 
+            "optionmenu" in f_str or 
+            "selector" in f_str or 
+            "toplevel" in f_str):
+            self._select_template_by_idx(idx)
+
+
+
+
     def _select_template_by_idx(self, idx):
+
         """Seleciona template pelo índice (Alt + 1-9)."""
         values = self.template_selector.cget("values")
         if idx < len(values):
