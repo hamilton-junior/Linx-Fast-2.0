@@ -193,7 +193,17 @@ class TemplateApp(ctk.CTk):
         """Atalho Ctrl+K para focar no seletor e abrir o menu."""
         if hasattr(self, "template_selector"):
             self.template_selector.focus_set()
+            # Tenta abrir o dropdown (método interno do CTkOptionMenu)
+            try:
+                self.template_selector._on_button_click()
+            except Exception:
+                try:
+                    self.template_selector._open_dropdown_menu()
+                except Exception:
+                    pass
         return "break"
+
+
 
 
     def _build_main_interface(self):
@@ -222,6 +232,11 @@ class TemplateApp(ctk.CTk):
             dynamic_resizing=False,  # Evita que o menu cresça além do width especificado
         )
         self.template_selector.pack(side="left", fill="x", expand=True)
+        # Bind de navegação por teclado (Seta Cima/Baixo e Números)
+        self.template_selector.bind("<Up>", lambda e: self._navigate_templates(-1))
+        self.template_selector.bind("<Down>", lambda e: self._navigate_templates(1))
+        for i in range(1, 10):
+            self.bind_all(f"<Alt-Key-{i}>", lambda e, idx=i-1: self._select_template_by_idx(idx))
 
         # Botão de Configurações ao lado do seletor de template
         self.settings_button = ctk.CTkButton(
@@ -1925,6 +1940,28 @@ class TemplateApp(ctk.CTk):
                 self.password_manager.set_today_password(senha_input)
                 pyperclip.copy(senha_input)
                 self.show_snackbar("Senha diária salva e copiada!")
+
+    def _navigate_templates(self, delta):
+        """Alterna entre templates usando as setas."""
+        values = self.template_selector.cget("values")
+        if not values: return
+        
+        current = self.current_template_display.get()
+        try:
+            idx = values.index(current)
+            new_idx = (idx + delta) % len(values)
+            self.template_selector.set(values[new_idx])
+            self.on_template_change(values[new_idx])
+        except ValueError:
+            self.template_selector.set(values[0])
+            self.on_template_change(values[0])
+
+    def _select_template_by_idx(self, idx):
+        """Seleciona template pelo índice (Alt + 1-9)."""
+        values = self.template_selector.cget("values")
+        if idx < len(values):
+            self.template_selector.set(values[idx])
+            self.on_template_change(values[idx])
 
     def on_template_change(self, selected_display_name):
         real_name = self.template_manager.meta.get_real_name(selected_display_name)
