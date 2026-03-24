@@ -13,7 +13,7 @@ from template_manager import TemplateManager
 from theme_manager import ThemeManager
 from dpm import DailyPasswordManager
 from settings_window import SettingsWindow
-from settings_manager import load_config
+from settings_manager import load_config, save_config
 from customtkinter import CTkInputDialog
 from logger_config import auto_log_functions
 
@@ -32,147 +32,7 @@ logger = logging.getLogger("main_window")
 __all__ = ["TemplateApp", "placeholder_engine"]
 
 
-# --- PlaceholderEngine e instância global ---
-@auto_log_functions
-class PlaceholderEngine:
-    """
-    Manages dynamic placeholder substitution in text templates.
-
-    Allows registration of custom handlers for placeholders and provides built-in support for date/time placeholders like $Agora$ and $Agora[formato]$.
-    """
-
-    def __init__(self):
-        self.handlers = {}
-
-    def register_handler(self, name, func):
-        self.handlers[name] = func
-
-    def process(self, text):
-        def replacer(match):
-            content = match.group(1)
-
-            # Handle $Agora$ and $Agora[format]$
-            if content == "Agora":
-                fmt = "%H:%M"
-                try:
-                    return datetime.datetime.now().strftime(fmt)
-                except Exception:
-                    return match.group(0)
-            if content.startswith("Agora[") and content.endswith("]"):
-                fmt = content[6:-1]
-                try:
-                    return datetime.datetime.now().strftime(fmt)
-                except Exception:
-                    return match.group(0)
-
-            # Support default value syntax: $Name|Default$
-            name = content
-            default = None
-            if "|" in content:
-                # Split only on the first '|' to allow '|' in defaults
-                name, default = content.split("|", 1)
-
-            # Trim whitespace
-            name = name.strip()
-            if default is not None:
-                default = default
-
-            # Support arguments syntax: Name(arg1,arg2)
-            args = []
-            base_name = name
-            if "(" in name and name.endswith(")"):
-                try:
-                    idx = name.index("(")
-                    base_name = name[:idx].strip()
-                    args_str = name[idx + 1 : -1]
-                    if args_str.strip() != "":
-                        # Parse arguments using csv.reader to allow quoted args with commas
-                        try:
-                            parsed = next(csv.reader([args_str], skipinitialspace=True))
-                        except Exception:
-                            parsed = [a.strip() for a in args_str.split(",")]
-
-                        # Convert numeric-looking args to int/float when possible, else keep as string
-                        def convert(v: str):
-                            v = v.strip()
-                            if v == "":
-                                return ""
-                            # Try int
-                            try:
-                                return int(v)
-                            except Exception:
-                                pass
-                            # Try float
-                            try:
-                                return float(v)
-                            except Exception:
-                                pass
-                            # Otherwise return string (without surrounding quotes if present)
-                            if (v.startswith('"') and v.endswith('"')) or (
-                                v.startswith("'") and v.endswith("'")
-                            ):
-                                return v[1:-1]
-                            return v
-
-                        args = [convert(a) for a in parsed]
-                except Exception:
-                    base_name = name
-
-            # Look up handler
-            handler = self.handlers.get(base_name)
-            if handler:
-                try:
-                    # Try calling with args; if handler doesn't accept them, fall back to no-arg call
-                    try:
-                        val = handler(*args)
-                    except TypeError:
-                        val = handler()
-                except Exception:
-                    val = None
-
-                if val is not None and val != "":
-                    return str(val)
-                if default is not None:
-                    return default
-                return match.group(0)
-
-            # No handler found: return default if provided, else leave placeholder intact
-            if default is not None:
-                return default
-            return match.group(0)
-
-        # Regex: capture everything between $...$ (restricted to avoid matching newlines)
-        return re.sub(r"\$([^\n\r$]+)\$", replacer, text)
-
-
-# Instância global da engine
-placeholder_engine = PlaceholderEngine()
-# Handlers padrões
-placeholder_engine.register_handler(
-    "Hoje", lambda: datetime.datetime.now().strftime("%d/%m/%Y")
-)
-DIAS_SEMANA_PT = {
-    "Monday": "segunda-feira",
-    "Tuesday": "terça-feira",
-    "Wednesday": "quarta-feira",
-    "Thursday": "quinta-feira",
-    "Friday": "sexta-feira",
-    "Saturday": "sábado",
-    "Sunday": "domingo",
-}
-
-placeholder_engine.register_handler(
-    "DiaSemana",
-    lambda: DIAS_SEMANA_PT.get(
-        datetime.datetime.now().strftime("%A"), datetime.datetime.now().strftime("%A")
-    ),
-)
-placeholder_engine.register_handler(
-    "HoraMinuto", lambda: datetime.datetime.now().strftime("%H:%M")
-)
-placeholder_engine.register_handler(
-    "HoraMinutoSegundo", lambda: datetime.datetime.now().strftime("%H:%M:%S")
-)
+from utils.placeholder_engine import placeholder_engine, PlaceholderEngine
 
 
 @auto_log_functions
@@ -2404,39 +2264,6 @@ class TemplateApp(ctk.CTk):
 
         animate(times)
 
-    def fetch_nocodb_templates(self, api_url, base_name, table_name, token):
-        """
-        Busca todos os templates do NocoDB via API REST, trazendo todos os registros.
-        """
-        import requests
-
-        headers = {"xc-token": token, "accept": "application/json"}
-        # Busca todos os registros (até 1000) usando pageSize
-        url = f"{api_url}/api/v1/db/data/v1/{base_name}/{table_name}?pageSize=1000"
-        try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            # Mostra todos os registros para depuração
-            if data.get("list"):
-                print(f"[NocoDB] {len(data['list'])} registros retornados.")
-            else:
-                print("[NocoDB] Nenhum registro encontrado.")
-            return data.get("list", [])
-        except requests.RequestException as e:
-            # Se a resposta da API tiver texto, printa no console
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    print("[NocoDB API ERROR]", e.response.text)
-                except Exception:
-                    print("[NocoDB API ERROR] (sem texto de resposta)")
-            else:
-                print("[NocoDB API ERROR]", str(e))
-            self.show_snackbar(
-                "Erro ao buscar templates. Veja o log para detalhes.",
-                toast_type="error",
-            )
-            return []
 
     def _refresh_all_template_selectors(self, select_template=None):
         # Atualiza todos os OptionMenus relevantes (main, editor, quick popup)
@@ -4078,7 +3905,23 @@ class TemplateApp(ctk.CTk):
         table_name = "mpvh49wivawwdx7"
         token = "UifsYUdNbfJFWVz3t7oOIPo2Idd51ykk2I-9FnzK"
 
-        templates = self.fetch_nocodb_templates(api_url, base_name, table_name, token)
+        try:
+            from nocodb_api import fetch_nocodb_templates
+            templates = fetch_nocodb_templates(api_url, base_name, table_name, token)
+        except Exception as e:
+            # Se a resposta da API tiver texto, printa no console
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    print("[NocoDB API ERROR]", e.response.text)
+                except Exception:
+                    print("[NocoDB API ERROR] (sem texto de resposta)")
+            else:
+                print("[NocoDB API ERROR]", str(e))
+            self.show_snackbar(
+                "Erro ao buscar templates. Veja o log para detalhes.",
+                toast_type="error",
+            )
+            templates = []
         if not templates:
             print("[NocoDB] Nenhum template retornado ou erro na consulta.")
 
@@ -4432,73 +4275,40 @@ class TemplateApp(ctk.CTk):
 
         if height >= 300:
             geometry_str = self.geometry()
-
             try:
-                # Carrega o config existente, se houver
-                if os.path.exists("config.json"):
-                    with open("config.json", "r", encoding="utf-8") as f:
-                        config = json.load(f)
-                else:
-                    config = {}
-
-                # Atualiza a geometria
+                config = load_config()
                 config["geometry"] = geometry_str
-
-                # Salva o arquivo atualizado
-                with open("config.json", "w", encoding="utf-8") as f:
-                    json.dump(config, f)
-
+                save_config(config)
             except Exception as e:
                 print(f"[ERRO ao salvar config]: {e}")
 
     def load_window_config(self):
         try:
-            with open("config.json", "r", encoding="utf-8") as f:
-                config = json.load(f)
-                geometry = config.get("geometry")
-                if geometry and "x" in geometry:
-                    self.geometry(geometry)
+            config = load_config()
+            geometry = config.get("geometry")
+            if geometry and "x" in geometry:
+                self.geometry(geometry)
         except Exception:
             pass
 
     def apply_saved_geometry(self):
-        try:
-            with open("config.json", "r", encoding="utf-8") as f:
-                config = json.load(f)
-                geometry = config.get("geometry")
-                if geometry and "x" in geometry:
-                    self.geometry(geometry)
-        except Exception:
-            pass
+        self.load_window_config()
 
     # --- Configuração de campos expansíveis ---
     def load_expandable_fields_config(self):
-        import json
-
-        if os.path.exists("config.json"):
-            try:
-                with open("config.json", "r", encoding="utf-8") as f:
-                    config = json.load(f)
-                return config.get(
-                    "expandable_fields", ["Procedimento Executado", "Problema Relatado"]
-                )
-            except Exception:
-                return ["Procedimento Executado", "Problema Relatado"]
-        return ["Procedimento Executado", "Problema Relatado"]
+        try:
+            config = load_config()
+            return config.get("expandable_fields", ["Procedimento Executado", "Problema Relatado"])
+        except Exception:
+            return ["Procedimento Executado", "Problema Relatado"]
 
     def save_expandable_fields_config(self):
-        import json
-
-        config = {}
-        if os.path.exists("config.json"):
-            try:
-                with open("config.json", "r", encoding="utf-8") as f:
-                    config = json.load(f)
-            except Exception:
-                config = {}
-        config["expandable_fields"] = self.expandable_fields
-        with open("config.json", "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4)
+        try:
+            config = load_config()
+            config["expandable_fields"] = self.expandable_fields
+            save_config(config)
+        except Exception:
+            pass
 
     def open_settings(self):
         # Permite apenas uma janela de configurações por vez
@@ -4596,33 +4406,20 @@ class TemplateApp(ctk.CTk):
                     )
 
     def load_theme_config(self):
-        import json
-
-        if os.path.exists("config.json"):
-            try:
-                with open("config.json", "r", encoding="utf-8") as f:
-                    config = json.load(f)
-                theme = config.get("theme_name", "green")
-                mode = config.get("appearance_mode", "dark")
-                return theme, mode
-            except Exception:
-                return "green", "dark"
-        return "green", "dark"
+        try:
+            config = load_config()
+            return config.get("theme_name", "green"), config.get("appearance_mode", "dark")
+        except Exception:
+            return "green", "dark"
 
     def save_theme_config(self, theme_name, appearance_mode):
-        import json
-
-        config = {}
-        if os.path.exists("config.json"):
-            try:
-                with open("config.json", "r", encoding="utf-8") as f:
-                    config = json.load(f)
-            except Exception:
-                config = {}
-        config["theme_name"] = theme_name
-        config["appearance_mode"] = appearance_mode
-        with open("config.json", "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4)
+        try:
+            config = load_config()
+            config["theme_name"] = theme_name
+            config["appearance_mode"] = appearance_mode
+            save_config(config)
+        except Exception:
+            pass
 
     def _safe_after(self, delay, callback):
         """Agende um after e registre o ID para cancelamento seguro."""
