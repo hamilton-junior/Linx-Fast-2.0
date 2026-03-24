@@ -14,10 +14,15 @@ class TemplateMeta:
         self.meta = {}
         self._load()
 
-    def _load(self):
+    def _load(self) -> None:
         if os.path.exists(self.meta_path):
-            with open(self.meta_path, "r", encoding="utf-8") as f:
-                self.meta = json.load(f)
+            try:
+                with open(self.meta_path, "r", encoding="utf-8") as f:
+                    self.meta = json.load(f)
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("meta.json corrompido ou ilegível – reiniciando: %s", exc)
+                self.meta = {}
+                return
             # Unifica entradas duplicadas (case-insensitive) e padroniza capitalização do nome do template (não da pasta)
             self._unify_case_insensitive_entries()
         else:

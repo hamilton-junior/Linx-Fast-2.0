@@ -1,1 +1,60 @@
-{"geometry": "392x566+602+272", "expandable_fields": ["Problema Relatado", "Procedimento Executado"], "theme_name": "green", "appearance_mode": "dark", "log_level": "ERROR", "templates_folder": "templates", "export_folder": "C:/OneDrive/OneDrive - Linx SA/\u00c1rea de Trabalho", "notifications": {"sound": true, "visual": true}, "animations": true, "autosave": {"enabled": false, "timeout": 60}, "smart_search": true, "enhanced_validation": true, "fonts": {"family": null, "size": 12}, "daily_password": {"date": "2025-10-16", "password": null}, "field_orders": {"Suporte / Teste Vars": ["[switch]Pesquisa Interna", "[radio:Thay|Nathan|Leandro]N2 Online", "[checkbox]Resolvido"], "Suporte / Exemplo de Condicionais": ["[switch]Pesquisa Interna", "[radio:Thay|Nathan|Leandro]N2 Online", "[checkbox]Resolvido"], "Suporte / Abertura de Chamado": [], "Template Exemplo buscado da API": ["adsada"]}, "fixed_fields": ["Nome", "Problema Relatado", "CNPJ", "Telefone", "Email", "Protocolo", "Procedimento Executado"], "field_definitions": {}, "theme": "green", "ui_scale": "100%"}
+{
+    "geometry": "392x566+1378+225",
+    "expandable_fields": [
+        "Problema Relatado",
+        "Procedimento Executado"
+    ],
+    "theme_name": "green",
+    "appearance_mode": "dark",
+    "log_level": "ERROR",
+    "templates_folder": "templates",
+    "export_folder": "C:/OneDrive/OneDrive - Linx SA/Área de Trabalho",
+    "notifications": {
+        "sound": true,
+        "visual": true
+    },
+    "animations": true,
+    "autosave": {
+        "enabled": false,
+        "timeout": 60
+    },
+    "smart_search": true,
+    "enhanced_validation": true,
+    "fonts": {
+        "family": null,
+        "size": 12
+    },
+    "daily_password": {
+        "date": "2026-03-24",
+        "password": null
+    },
+    "field_orders": {
+        "Suporte / Teste Vars": [
+            "[switch]Pesquisa Interna",
+            "[radio:Thay|Nathan|Leandro]N2 Online",
+            "[checkbox]Resolvido"
+        ],
+        "Suporte / Exemplo de Condicionais": [
+            "[switch]Pesquisa Interna",
+            "[radio:Thay|Nathan|Leandro]N2 Online",
+            "[checkbox]Resolvido"
+        ],
+        "Suporte / Abertura de Chamado": [],
+        "Template Exemplo buscado da API": [
+            "adsada"
+        ],
+        "Dev / Exemplo de Condicionais": []
+    },
+    "fixed_fields": [
+        "Nome",
+        "Problema Relatado",
+        "CNPJ",
+        "Telefone",
+        "Email",
+        "Protocolo",
+        "Procedimento Executado"
+    ],
+    "field_definitions": {},
+    "theme": "green",
+    "ui_scale": "100%"
+}

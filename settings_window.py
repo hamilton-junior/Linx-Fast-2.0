@@ -4,13 +4,14 @@ Provides tabbed configuration sections with automatic size adjustments and
 log preview helpers that stay responsive to the current application state.
 """
 
+import json
 import os
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from logger_config import clear_logs, set_log_level, tail_log_file
+from logger_config import clear_logs, get_log_file_path, set_log_level, tail_log_file
 from settings_manager import DEFAULT_CONFIG, load_config, save_config
 
 
@@ -530,7 +531,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def _export_logs(self):
         # Export the fast.log file to a chosen location
-        src = os.path.join(os.getcwd(), "log", "fast.log")
+        src = get_log_file_path()
         if not os.path.exists(src):
             messagebox.showinfo("Exportar Logs", "Arquivo de log não encontrado.")
             return
@@ -604,8 +605,6 @@ class SettingsWindow(ctk.CTkToplevel):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 cfg = f.read()
-            import json
-
             obj = json.loads(cfg)
             # Merge and save
             self.config.update(obj)
@@ -632,8 +631,6 @@ class SettingsWindow(ctk.CTkToplevel):
         if not path:
             return
         try:
-            import json
-
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(self.config, f, indent=4, ensure_ascii=False)
             messagebox.showinfo("Exportado", f"Config exportada para: {path}")

@@ -75,7 +75,7 @@ def get_log_level():
     if hasattr(logging, env_level_name):
         return getattr(logging, env_level_name)
 
-    print(f"[DEBUG] LFASTLOGLEVEL={env_level}, log_level={env_level_name}")
+    logging.warning("LFASTLOGLEVEL='%s' não reconhecido – usando INFO.", env_level)
     return logging.INFO
 
 
@@ -141,7 +141,8 @@ def setup_logging():
     level_name = logging.getLevelName(log_level)
 
     # Loga o valor lido da variável de ambiente para depuração
-    print(
+    # (usa print aqui pois o logger ainda não está configurado neste ponto)
+    print(  # noqa: T201
         f"[LOG VAR] LFASTLOGLEVEL={os.getenv('LFASTLOGLEVEL')}, log_level={log_level} ({level_name})"
     )
 
