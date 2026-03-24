@@ -593,6 +593,10 @@ class SettingsWindow(ctk.CTkToplevel):
             messagebox.showerror("Erro", f"Erro ao resetar configuração: {e}")
 
     def _close(self):
+        if getattr(self, "_is_closing", False):
+            return
+        self._is_closing = True
+
         self._cancel_job("_resize_job")
         # log preview job removed
         try:
@@ -678,6 +682,12 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def destroy(self):
         """Ensure destroy always routes through cleanup logic."""
+        if getattr(self, "_is_closing", False):
+            try:
+                super().destroy()
+            except Exception:
+                pass
+            return
         self._close()
 
     def on_theme_changed(self):

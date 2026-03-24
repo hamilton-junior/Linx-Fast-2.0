@@ -1570,37 +1570,27 @@ class TemplateApp(ctk.CTk):
             return
 
     def save_field_order(self):
-        """Salva a ordem dos campos dinâmicos do template atual no arquivo config.json."""
         try:
-            if os.path.exists("config.json"):
-                with open("config.json", "r", encoding="utf-8") as f:
-                    config = json.load(f)
-            else:
-                config = {}
-
+            config = load_config()
             if "field_orders" not in config:
                 config["field_orders"] = {}
 
             config["field_orders"][self.current_template] = self.dynamic_fields
-
-            with open("config.json", "w", encoding="utf-8") as f:
-                json.dump(config, f, indent=4)
+            save_config(config)
         except Exception as e:
             print(f"[ERRO ao salvar ordem dos campos]: {e}")
 
     def load_field_order(self):
         """Carrega a ordem dos campos dinâmicos do template atual, se existir."""
         try:
-            if os.path.exists("config.json"):
-                with open("config.json", "r", encoding="utf-8") as f:
-                    config = json.load(f)
-                field_orders = config.get("field_orders", {})
-                order = field_orders.get(self.current_template)
-                if order:
-                    # Garante que só mantenha campos realmente presentes no template
-                    self.dynamic_fields = [
-                        f for f in order if f in self.dynamic_fields
-                    ] + [f for f in self.dynamic_fields if f not in order]
+            config = load_config()
+            field_orders = config.get("field_orders", {})
+            order = field_orders.get(self.current_template)
+            if order:
+                # Garante que só mantenha campos realmente presentes no template
+                self.dynamic_fields = [
+                    f for f in order if f in self.dynamic_fields
+                ] + [f for f in self.dynamic_fields if f not in order]
         except Exception as e:
             print(f"[ERRO ao carregar ordem dos campos]: {e}")
 
@@ -2063,9 +2053,19 @@ class TemplateApp(ctk.CTk):
                     entry.insert("1.0", valor_antigo)
                 elif isinstance(entry, ctk.CTkEntry):
                     entry.insert(0, valor_antigo)
-                elif isinstance(
-                    entry, (ctk.StringVar, ctk.CTkSwitch, ctk.CTkCheckBox)
-                ) or hasattr(entry, "set"):
+                elif isinstance(entry, (ctk.CTkSwitch, ctk.CTkCheckBox)):
+                    try:
+                        if str(valor_antigo).lower() in ("true", "1", "yes", "on"):
+                            if hasattr(entry, "select"):
+                                entry.select()
+                        else:
+                            if hasattr(entry, "deselect"):
+                                entry.deselect()
+                    except Exception as e:
+                        logger.warning(
+                            f"Erro ao restaurar valor {valor_antigo} para {k}: {e}"
+                        )
+                elif isinstance(entry, ctk.StringVar) or hasattr(entry, "set"):
                     try:
                         entry.set(valor_antigo)
                     except Exception as e:

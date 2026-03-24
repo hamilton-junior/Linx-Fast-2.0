@@ -1,0 +1,31 @@
+{
+    "geometry": "392x566+624+294",
+    "expandable_fields": [
+        "Procedimento Executado",
+        "Problema Relatado"
+    ],
+    "theme_name": "green",
+    "appearance_mode": "dark",
+    "log_level": "INFO",
+    "templates_folder": "templates",
+    "export_folder": "",
+    "notifications": {
+        "sound": true,
+        "visual": true
+    },
+    "animations": true,
+    "autosave": {
+        "enabled": false,
+        "timeout": 60
+    },
+    "smart_search": true,
+    "enhanced_validation": true,
+    "fonts": {
+        "family": null,
+        "size": 12
+    },
+    "daily_password": {
+        "date": "2026-03-24",
+        "password": null
+    }
+}

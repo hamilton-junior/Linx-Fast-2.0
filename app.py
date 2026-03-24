@@ -12,5 +12,4 @@ if __name__ == "__main__":
         app = TemplateApp()
         app.mainloop()
     except Exception:
-        logger.exception("Erro fatal na aplicação:")
-        raiseapp.py 
+        raise
