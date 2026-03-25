@@ -145,26 +145,30 @@ class ThemeManager:
                 logger.error("Error scheduling refresh for window %s: %s", window, exc)
 
     def _refresh_single_window_safe(self, window):
-        """Refresh a single window and all its widgets, handling exceptions and avoiding recursion issues."""
+        """Refresh a single window and all its widgets, avoiding redundant traversals."""
         try:
             if not getattr(window, "winfo_exists", lambda: False)():
                 return
-            # Atualiza todos os widgets recursivamente
+            
+            # 1. Apply theme colors to all widgets in the tree (iterative, safe)
             self._apply_theme_to_all_widgets(window)
-            # Chama métodos de atualização específicos se existirem
+            
+            # 2. Call specific update methods if they exist
+            # We call these AFTER the general styling so windows can do custom adjustments
             if hasattr(window, "on_theme_changed"):
                 try:
+                    # Note: windows should avoid calling theme_manager.apply_theme_to(self) 
+                    # inside on_theme_changed to avoid redundant work.
                     window.on_theme_changed()
                 except Exception:
                     pass
-            if hasattr(window, "reload_theme_and_interface"):
+            elif hasattr(window, "reload_theme_and_interface"):
                 try:
                     window.reload_theme_and_interface()
                 except Exception:
                     pass
-            # Recursivo para filhos
-            self._apply_appearance_recursive(window)
-            # Força redraw
+            
+            # 3. Force redraw
             try:
                 window.update_idletasks()
             except Exception:
@@ -172,38 +176,50 @@ class ThemeManager:
         except Exception as exc:
             logger.error("Error refreshing window %s: %s", window, exc)
 
-    def _apply_theme_to_all_widgets(self, widget):
-        """Recursively update all CTk widgets' colors to match the current theme."""
+    def _apply_theme_to_all_widgets(self, root_widget):
+        """Iteratively update all CTk widgets' colors to match the current theme, safely."""
         try:
-            widget_class = widget.__class__.__name__
             theme = ctk.ThemeManager.theme
             current_mode = self.get_current_appearance()
-            # Atualiza todas as propriedades de cor se presentes no tema
-            for prop in (
-                "fg_color",
-                "bg_color",
-                "text_color",
-                "border_color",
-                "hover_color",
-            ):
+            visited = set()
+            stack = [root_widget]
+
+            while stack:
+                widget = stack.pop()
+                widget_id = id(widget)
+                if widget_id in visited:
+                    continue
+                visited.add(widget_id)
+
                 try:
-                    if prop in theme.get(widget_class, {}):
-                        color = theme[widget_class][prop]
-                        if isinstance(color, (list, tuple)):
-                            color = (
-                                color[0] if current_mode.lower() == "dark" else color[1]
-                            )
-                        widget.configure(**{prop: color})
+                    widget_class = widget.__class__.__name__
+                    # Actual configuration
+                    if widget_class in theme:
+                        for prop in ("fg_color", "bg_color", "text_color", "border_color", "hover_color"):
+                            try:
+                                if prop in theme[widget_class]:
+                                    color = theme[widget_class][prop]
+                                    if isinstance(color, (list, tuple)):
+                                        color = color[1] if current_mode.lower() == "dark" else color[0]
+                                    widget.configure(**{prop: color})
+                            except Exception:
+                                pass
                 except Exception:
                     pass
-            # Tratamento especial para OptionMenu, ComboBox, Listbox, etc
-            if hasattr(widget, "dropdown_menu") and widget.dropdown_menu:
-                self._apply_theme_to_all_widgets(widget.dropdown_menu)
-            if hasattr(widget, "listbox") and widget.listbox:
-                self._apply_theme_to_all_widgets(widget.listbox)
-            # Recursivo para filhos
-            for child in widget.winfo_children():
-                self._apply_theme_to_all_widgets(child)
+
+                # Add special components (dropdowns, etc)
+                for attr in ("dropdown_menu", "listbox"):
+                    component = getattr(widget, attr, None)
+                    if component and id(component) not in visited:
+                        stack.append(component)
+
+                # Add standard children
+                try:
+                    for child in widget.winfo_children():
+                        if id(child) not in visited:
+                            stack.append(child)
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -212,25 +228,8 @@ class ThemeManager:
         try:
             if not getattr(window, "winfo_exists", lambda: False)():
                 return
-            if hasattr(window, "on_theme_changed"):
-                try:
-                    window.on_theme_changed()
-                except Exception:
-                    # Fallback to reload or recursive apply
-                    if hasattr(window, "reload_theme_and_interface"):
-                        try:
-                            window.reload_theme_and_interface()
-                        except Exception:
-                            self.apply_theme_to(window)
-                    else:
-                        self.apply_theme_to(window)
-            elif hasattr(window, "reload_theme_and_interface"):
-                try:
-                    window.reload_theme_and_interface()
-                except Exception:
-                    self.apply_theme_to(window)
-            else:
-                self.apply_theme_to(window)
+            # Use the robust safe refresh logic by default
+            self._refresh_single_window_safe(window)
 
             try:
                 window.update_idletasks()
@@ -301,7 +300,7 @@ class ThemeManager:
 
             def _normalize(col):
                 if isinstance(col, (list, tuple)):
-                    return col[0] if current_mode.lower() == "dark" else col[1]
+                    return col[1] if current_mode.lower() == "dark" else col[0]
                 return col
 
             def _check_widget(widget):
@@ -363,74 +362,6 @@ class ThemeManager:
         except Exception as exc:
             logger.debug("_verify_and_fix_window failed for %s: %s", window, exc)
 
-    def _apply_appearance_recursive(self, widget: ctk.CTkBaseClass) -> None:  # type: ignore[type-arg]
-        # First try to let the widget apply its own appearance mode if available
-        if hasattr(widget, "_apply_appearance_mode"):
-            try:
-                widget._apply_appearance_mode(self.mode)
-            except Exception:
-                pass
-
-        # Best-effort: apply theme-default colours to common widget classes so
-        # they immediately reflect the active theme even if they were created
-        # earlier with theme-derived colours. Widgets can opt-out by setting
-        # attribute `_custom_theme_overrides = True`.
-        try:
-            if not getattr(widget, "_custom_theme_overrides", False):
-                cls_name = widget.__class__.__name__
-                # Common mappings: widget class -> (property, optional transform)
-                try:
-                    if cls_name == "CTkButton":
-                        fg = self.get_theme_default_color(ctk.CTkButton, "fg_color")
-                        try:
-                            widget.configure(fg_color=fg)
-                        except Exception:
-                            pass
-                        try:
-                            # hover_color not always present
-                            widget.configure(
-                                hover_color=self.get_darker_color(fg, 0.08)
-                            )
-                        except Exception:
-                            pass
-                    elif cls_name in ("CTkEntry", "CTkComboBox", "CTkOptionMenu"):
-                        try:
-                            border = self.get_theme_default_color(
-                                ctk.CTkEntry, "border_color"
-                            )
-                            widget.configure(border_color=border)
-                        except Exception:
-                            pass
-                    elif cls_name == "CTkTextbox":
-                        try:
-                            border = self.get_theme_default_color(
-                                ctk.CTkTextbox, "border_color"
-                            )
-                            widget.configure(border_color=border)
-                        except Exception:
-                            pass
-                    elif cls_name == "CTkLabel":
-                        try:
-                            txt = self.get_theme_default_color(
-                                ctk.CTkLabel, "text_color"
-                            )
-                            widget.configure(text_color=txt)
-                        except Exception:
-                            pass
-                    elif cls_name == "CTkFrame":
-                        try:
-                            bg = self.get_theme_default_color(ctk.CTkFrame, "fg_color")
-                            widget.configure(fg_color=bg)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # Recurse into children
-        for child in widget.winfo_children():
-            self._apply_appearance_recursive(child)
 
     def apply_theme_to(self, widget: ctk.CTkBaseClass) -> None:
         """Public helper to apply current theme/appearance recursively to a widget.
@@ -441,7 +372,7 @@ class ThemeManager:
         try:
             if not widget or not getattr(widget, "winfo_exists", lambda: False)():
                 return
-            self._apply_appearance_recursive(widget)
+            self._apply_theme_to_all_widgets(widget)
             try:
                 widget.update_idletasks()
             except Exception:
@@ -458,7 +389,7 @@ class ThemeManager:
 
             current_mode = self.get_current_appearance()
             if isinstance(color, (list, tuple)):
-                return color[0] if current_mode.lower() == "dark" else color[1]
+                return color[1] if current_mode.lower() == "dark" else color[0]
             return color
         except (KeyError, IndexError):
             return "#FF0000"  # fallback colour

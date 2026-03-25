@@ -202,9 +202,9 @@ class TemplateApp(ctk.CTk):
             width=36,
             height=30,
             anchor="center",
-            fg_color="transparent",  # Fundo transparente
-            hover_color="#222222",  # (opcional) cor ao passar o mouse, pode ajustar conforme o tema
-            border_width=0,  # (opcional) sem borda
+            fg_color="transparent",
+            hover_color=("#E0E0E0", "#222222"),  # Ajuste conforme o modo (light, dark)
+            border_width=0,
         )
         self.btn_daily_password.grid(
             sticky="w", row=2, column=0, padx=(5, 0), pady=(5, 0)
@@ -730,11 +730,8 @@ class TemplateApp(ctk.CTk):
         try:
             if not hasattr(self, "theme_manager") or not self.theme_manager:
                 return
-            # Apply theme recursively to all widgets in this window
-            try:
-                self.theme_manager.apply_theme_to(self)
-            except Exception:
-                pass
+            # ThemeManager already applies colors to all widgets before calling this method.
+            # We only need to handle custom/special overrides here.
 
             # Update key buttons to use theme defaults (ensures colours update even if
             # they were created earlier with theme-derived colours)

@@ -1,7 +1,8 @@
-__pycache__/*
+*pycache*
 *.spec
 templates/Template Padrão.txt
 log/*
 config.json
 Linx-Fast-2.0.code-workspace
 .venv*
+logs/*

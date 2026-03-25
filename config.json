@@ -1,11 +1,11 @@
 {
-    "geometry": "392x566+624+294",
+    "geometry": "392x566+807+174",
     "expandable_fields": [
         "Procedimento Executado",
         "Problema Relatado"
     ],
     "theme_name": "green",
-    "appearance_mode": "dark",
+    "appearance_mode": "light",
     "log_level": "INFO",
     "templates_folder": "templates",
     "export_folder": "",
