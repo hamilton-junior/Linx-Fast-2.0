@@ -6,6 +6,7 @@ log preview helpers that stay responsive to the current application state.
 
 import os
 import copy
+import logging
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -14,10 +15,13 @@ import customtkinter as ctk
 from logger_config import set_log_level
 from settings_manager import DEFAULT_CONFIG, load_config, save_config
 
+logger = logging.getLogger(__name__)
+
 
 class SettingsWindow(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
+        logger.debug("SettingsWindow.__init__: Starting initialization")
         self.master = master
         self.title("Configurações - Linx Fast")
         try:
@@ -38,21 +42,32 @@ class SettingsWindow(ctk.CTkToplevel):
             os.path.join(os.path.dirname(__file__), "config.json")
         )
         self.config = load_config(self.config_path)
+        logger.debug(
+            f"SettingsWindow.__init__: Loaded config - theme_name='{self.config.get('theme_name')}', appearance_mode='{self.config.get('appearance_mode')}'"
+        )
 
         # Snapshot initial config so we can detect changes on close
         try:
             self._initial_config = copy.deepcopy(self.config)
+            logger.debug(
+                f"SettingsWindow.__init__: Snapshot initial config - theme_name='{self._initial_config.get('theme_name')}'"
+            )
         except Exception:
             self._initial_config = dict(self.config)
+            logger.debug(
+                f"SettingsWindow.__init__: Created initial config snapshot (shallow copy) - theme_name='{self._initial_config.get('theme_name')}'"
+            )
 
         # Get theme manager from master window
         self.theme_manager = self.master.theme_manager
         self.theme_manager.register_window(self)
+        logger.debug("SettingsWindow.__init__: Registered with theme_manager")
 
         self._resize_job = None
         self._pending_geometry_capture = True
         self._geometry_padding = (0, 0)
         self._min_geometry = (400, 320)
+        self._in_theme_change = False  # Re-entrancy guard for theme updates
 
         # UI: tabs
         self.tabs = ctk.CTkTabview(self, command=self._on_tab_changed)
@@ -173,6 +188,7 @@ class SettingsWindow(ctk.CTkToplevel):
             setattr(self, attr_name, None)
 
     def _build_appearance_tab(self):
+        logger.debug("_build_appearance_tab: Building appearance tab")
         f = ctk.CTkFrame(self.tabs.tab("Aparência"))
         f.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -203,7 +219,15 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk_themes = ["green", "blue", "dark-blue"]
         theme_files = ctk_themes + custom_themes
         # Use the canonical 'theme_name' key from settings_manager.DEFAULT_CONFIG
-        self.theme_var = ctk.StringVar(value=self.config.get("theme_name", "green"))
+        current_theme = self.config.get("theme_name", "green")
+        logger.debug(
+            f"_build_appearance_tab: Creating theme StringVar with value='{current_theme}'"
+        )
+
+        # Create StringVar without triggering callbacks yet
+        self.theme_var = ctk.StringVar(value=current_theme)
+
+        logger.debug(f"_build_appearance_tab: Creating theme combobox")
         theme_combo = ctk.CTkComboBox(
             theme_select_frame,
             values=theme_files,
@@ -211,6 +235,9 @@ class SettingsWindow(ctk.CTkToplevel):
             command=self._on_theme_change,
         )
         theme_combo.pack(side="left", fill="x", expand=True)
+        logger.debug(
+            f"_build_appearance_tab: Theme combobox created, current value='{self.theme_var.get()}'"
+        )
 
         # Appearance mode selection
         appearance_frame = ctk.CTkFrame(f)
@@ -224,9 +251,15 @@ class SettingsWindow(ctk.CTkToplevel):
         mode_select_frame.pack(fill="x", padx=6, pady=2)
         ctk.CTkLabel(mode_select_frame, text="Modo:").pack(side="left", padx=(0, 10))
 
-        self.appearance_var = ctk.StringVar(
-            value=self.config.get("appearance_mode", "dark")
+        current_mode = self.config.get("appearance_mode", "dark")
+        logger.debug(
+            f"_build_appearance_tab: Creating appearance StringVar with value='{current_mode}'"
         )
+
+        # Create StringVar without triggering callbacks yet
+        self.appearance_var = ctk.StringVar(value=current_mode)
+
+        logger.debug(f"_build_appearance_tab: Creating appearance combobox")
         mode_combo = ctk.CTkComboBox(
             mode_select_frame,
             values=["light", "dark"],
@@ -234,6 +267,9 @@ class SettingsWindow(ctk.CTkToplevel):
             command=self._on_appearance_change,
         )
         mode_combo.pack(side="left", fill="x", expand=True)
+        logger.debug(
+            f"_build_appearance_tab: Appearance combobox created, current value='{self.appearance_var.get()}'"
+        )
 
     def _build_general_tab(self):
         f = ctk.CTkFrame(self.tabs.tab("Geral"))
@@ -399,36 +435,74 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def _on_theme_change(self, value):
         """Handle theme changes in real-time"""
-        # Persist under the canonical key name
-        self.config["theme_name"] = value
+        if self._in_theme_change:
+            logger.debug(f"_on_theme_change: Re-entrancy guard active, skipping (value={value})")
+            return
+
+        self._in_theme_change = True
         try:
-            # Only set theme if it actually changed to avoid redundant refreshes
+            logger.debug(f"_on_theme_change: User selected theme '{value}'")
+            # Persist under the canonical key name
+            self.config["theme_name"] = value
             try:
-                current = getattr(self.theme_manager, "theme_name", None)
-            except Exception:
-                current = None
-            if value != current:
-                self.theme_manager.set_theme(value)
-            save_config(self.config, self.config_path)
-            self.master.update_idletasks()  # Force immediate update
-        except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao alterar tema: {e}")
+                # Only set theme if it actually changed to avoid redundant refreshes
+                try:
+                    current = getattr(self.theme_manager, "theme_name", None)
+                except Exception:
+                    current = None
+                logger.debug(f"_on_theme_change: Current theme='{current}', new='{value}'")
+                if value != current:
+                    logger.debug(
+                        f"_on_theme_change: Applying theme change via theme_manager"
+                    )
+                    self.theme_manager.set_theme(value)
+                    logger.debug(
+                        f"_on_theme_change: Theme set - theme_manager will call refresh and on_theme_changed()"
+                    )
+                else:
+                    logger.debug(f"_on_theme_change: Theme unchanged, skipping")
+                save_config(self.config, self.config_path)
+                logger.debug(f"_on_theme_change: Config saved")
+            except Exception as e:
+                logger.exception(f"_on_theme_change: Error during theme change: {e}")
+                messagebox.showerror("Erro", f"Erro ao alterar tema: {e}")
+        finally:
+            self._in_theme_change = False
 
     def _on_appearance_change(self, value):
         """Handle appearance mode changes in real-time"""
-        self.config["appearance_mode"] = value
+        if self._in_theme_change:
+            logger.debug(f"_on_appearance_change: Re-entrancy guard active, skipping (value={value})")
+            return
+
+        self._in_theme_change = True
         try:
-            # Only change appearance mode if it actually differs
+            logger.debug(f"_on_appearance_change: User selected appearance mode '{value}'")
+            self.config["appearance_mode"] = value
             try:
-                current = self.theme_manager.get_current_appearance()
-            except Exception:
-                current = None
-            if value != current:
-                self.theme_manager.set_appearance_mode(value)
-            save_config(self.config, self.config_path)
-            self.master.update_idletasks()  # Force immediate update
-        except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao alterar modo de aparência: {e}")
+                # Only change appearance mode if it actually differs
+                try:
+                    current = self.theme_manager.get_current_appearance()
+                except Exception:
+                    current = None
+                logger.debug(f"_on_appearance_change: Current mode='{current}', new='{value}'")
+                if value != current:
+                    logger.debug(
+                        f"_on_appearance_change: Applying appearance mode change via theme_manager"
+                    )
+                    self.theme_manager.set_appearance_mode(value)
+                    logger.debug(
+                        f"_on_appearance_change: Mode set - theme_manager will call refresh and on_theme_changed()"
+                    )
+                else:
+                    logger.debug(f"_on_appearance_change: Mode unchanged, skipping")
+                save_config(self.config, self.config_path)
+                logger.debug(f"_on_appearance_change: Config saved")
+            except Exception as e:
+                logger.exception(f"_on_appearance_change: Error during mode change: {e}")
+                messagebox.showerror("Erro", f"Erro ao alterar modo de aparência: {e}")
+        finally:
+            self._in_theme_change = False
 
     def _build_advanced_tab(self):
         f = ctk.CTkFrame(self.tabs.tab("Avançado"))
@@ -593,7 +667,9 @@ class SettingsWindow(ctk.CTkToplevel):
             messagebox.showerror("Erro", f"Erro ao resetar configuração: {e}")
 
     def _close(self):
+        logger.debug("_close: Closing settings window")
         if getattr(self, "_is_closing", False):
+            logger.debug("_close: Already closing, skipping")
             return
         self._is_closing = True
 
@@ -603,69 +679,38 @@ class SettingsWindow(ctk.CTkToplevel):
             self.grab_release()
         except Exception:
             pass
-        # If relevant config changed compared to when the settings window was
-        # opened, apply a full app-level refresh (soft restart) without closing
-        # the application. This preserves state while ensuring all windows
-        # reflect the new settings immediately.
+
+        # Check if any non-theme config changed
+        # (Theme/appearance changes are already applied in real-time via _on_theme_change/_on_appearance_change)
         try:
             changed = False
-            keys_to_check = ("theme_name", "appearance_mode", "animations", "fonts")
+            # Skip theme_name and appearance_mode - they're already applied via real-time handlers
+            keys_to_check = ("animations", "fonts")
             for k in keys_to_check:
                 old = self._initial_config.get(k)
                 new = self.config.get(k)
                 if old != new:
+                    logger.debug(f"_close: Config changed - {k}: {old} → {new}")
                     changed = True
                     break
+
             if changed:
+                logger.debug("_close: Non-theme config changed, saving")
                 # Persist final config
                 try:
                     save_config(self.config, self.config_path)
                 except Exception:
                     pass
+            else:
+                logger.debug(
+                    "_close: No config changes detected (theme already applied in real-time)"
+                )
 
-                # Ensure theme/appearance are set on the ThemeManager
-                try:
-                    if hasattr(self, "theme_manager") and self.theme_manager:
-                        try:
-                            # Apply appearance first
-                            if "appearance_mode" in self.config:
-                                self.theme_manager.set_appearance_mode(
-                                    self.config.get("appearance_mode")
-                                )
-                        except Exception:
-                            pass
-                        try:
-                            if "theme_name" in self.config:
-                                self.theme_manager.set_theme(
-                                    self.config.get("theme_name")
-                                )
-                        except Exception:
-                            pass
-                        # Ask ThemeManager to refresh all windows and verify colours
-                        try:
-                            self.theme_manager.refresh_all_windows_async()
-                        except Exception:
-                            pass
-                        try:
-                            self.theme_manager.verify_and_fix_all_windows()
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-
-                # Request the main window to perform a more complete reload if available
-                try:
-                    if hasattr(self.master, "reload_theme_and_interface"):
-                        try:
-                            self.master.reload_theme_and_interface()
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception(f"_close: Error checking config changes: {e}")
 
         # Unregister and destroy as usual
+        logger.debug("_close: Unregistering from theme manager")
         if hasattr(self, "theme_manager"):
             try:
                 self.theme_manager.unregister_window(self)
@@ -675,8 +720,10 @@ class SettingsWindow(ctk.CTkToplevel):
             self.master, "_settings_window"
         ) is self:
             self.master._settings_window = None
+            logger.debug("_close: Cleared _settings_window reference")
         try:
             super().destroy()
+            logger.debug("_close: Window destroyed")
         except Exception:
             pass
 
@@ -690,12 +737,51 @@ class SettingsWindow(ctk.CTkToplevel):
             return
         self._close()
 
+    def _update_colors_only(self):
+        """Lightweight color-only update called from main window's apply_theme_globally.
+
+        Does NOT trigger theme change callbacks - only updates widget colors.
+        """
+        logger.debug("_update_colors_only: Updating settings window colors")
+        try:
+            if hasattr(self, "theme_manager"):
+                try:
+                    # Prefer CTkToplevel theme default if present
+                    try:
+                        fg = self.theme_manager.get_theme_default_color(
+                            ctk.CTkToplevel, "fg_color"
+                        )
+                        try:
+                            self.configure(fg_color=fg)
+                            logger.debug(f"_update_colors_only: Applied background color")
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
+                    # Apply theme recursively to all children/widgets
+                    try:
+                        self.theme_manager.apply_theme_to(self)
+                        logger.debug(f"_update_colors_only: Applied theme to all widgets")
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            try:
+                self.update_idletasks()
+            except Exception:
+                pass
+            logger.debug("_update_colors_only: Complete")
+        except Exception:
+            logger.exception("_update_colors_only: Error")
+
     def on_theme_changed(self):
         """Called by ThemeManager when the global theme/appearance changes.
 
         Apply the current theme to this window and attempt to reconfigure the
         toplevel background so it matches the active theme immediately.
         """
+        logger.debug("on_theme_changed: Called by theme_manager")
         try:
             if hasattr(self, "theme_manager"):
                 try:
@@ -722,5 +808,6 @@ class SettingsWindow(ctk.CTkToplevel):
                 self.update_idletasks()
             except Exception:
                 pass
+            logger.debug("on_theme_changed: Complete")
         except Exception:
-            pass
+            logger.exception("on_theme_changed: Error")

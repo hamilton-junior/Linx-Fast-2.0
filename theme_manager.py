@@ -38,33 +38,51 @@ class ThemeManager:
     # ----------------------------------------------------------------- setters
     def set_theme(self, theme_name: str) -> None:
         """Set theme and update all managed windows. Does NOT change appearance mode."""
+        logger.debug(
+            f"set_theme: Called with theme_name='{theme_name}', current theme='{self.theme_name}'"
+        )
+
         if theme_name == self.theme_name:
-            logger.debug("set_theme called with same theme '%s' - skipping", theme_name)
+            logger.debug("set_theme: Theme unchanged, skipping")
             return
 
         if self._in_set_theme:
             logger.debug(
-                "Already setting theme, skipping nested call for '%s'", theme_name
+                "set_theme: Re-entrancy guard active, skipping nested call for '%s'",
+                theme_name,
             )
             return
 
         self._in_set_theme = True
         try:
+            logger.debug(f"set_theme: Setting theme to '{theme_name}'")
             theme_path = self.themes_dir / f"{theme_name}.json"
             if theme_path.exists():
+                logger.debug(f"set_theme: Loading theme from custom file: {theme_path}")
                 ctk.set_default_color_theme(str(theme_path))
             else:
+                logger.debug(f"set_theme: Using built-in theme: {theme_name}")
                 ctk.set_default_color_theme(theme_name)
             self.theme_name = theme_name
+            logger.debug(
+                f"set_theme: Theme updated to '{theme_name}', registered windows={len(self.windows)}"
+            )
             # Do NOT change appearance mode here!
             try:
                 if not self._refresh_pending:
                     self._refresh_pending = True
+                    logger.debug(f"set_theme: Calling refresh_all_windows_async()")
                     self.refresh_all_windows_async()
+                    logger.debug(f"set_theme: refresh_all_windows_async() returned")
+                else:
+                    logger.debug(f"set_theme: Refresh already pending, skipping")
             finally:
                 self._refresh_pending = False
+        except Exception as e:
+            logger.exception(f"set_theme: Error during theme setting: {e}")
         finally:
             self._in_set_theme = False
+            logger.debug(f"set_theme: Finished")
 
     def set_appearance_mode(self, mode: str) -> None:
         """Set appearance mode and refresh open windows. Does NOT change theme."""
@@ -146,35 +164,76 @@ class ThemeManager:
 
     def _refresh_single_window_safe(self, window):
         """Refresh a single window and all its widgets, avoiding redundant traversals."""
+        window_name = window.__class__.__name__
+        logger.debug(f"_refresh_single_window_safe: Starting for {window_name}")
         try:
             if not getattr(window, "winfo_exists", lambda: False)():
+                logger.debug(
+                    f"_refresh_single_window_safe: Window {window_name} does not exist, returning"
+                )
                 return
-            
+
             # 1. Apply theme colors to all widgets in the tree (iterative, safe)
+            logger.debug(
+                f"_refresh_single_window_safe: Applying theme colors to {window_name}"
+            )
             self._apply_theme_to_all_widgets(window)
-            
+            logger.debug(
+                f"_refresh_single_window_safe: Theme colors applied to {window_name}"
+            )
+
             # 2. Call specific update methods if they exist
             # We call these AFTER the general styling so windows can do custom adjustments
             if hasattr(window, "on_theme_changed"):
+                logger.debug(
+                    f"_refresh_single_window_safe: Calling on_theme_changed() for {window_name}"
+                )
                 try:
-                    # Note: windows should avoid calling theme_manager.apply_theme_to(self) 
+                    # Note: windows should avoid calling theme_manager.apply_theme_to(self)
                     # inside on_theme_changed to avoid redundant work.
                     window.on_theme_changed()
-                except Exception:
-                    pass
+                    logger.debug(
+                        f"_refresh_single_window_safe: on_theme_changed() completed for {window_name}"
+                    )
+                except Exception as e:
+                    logger.exception(
+                        f"_refresh_single_window_safe: on_theme_changed() failed for {window_name}: {e}"
+                    )
             elif hasattr(window, "reload_theme_and_interface"):
+                logger.debug(
+                    f"_refresh_single_window_safe: Calling reload_theme_and_interface() for {window_name}"
+                )
                 try:
                     window.reload_theme_and_interface()
-                except Exception:
-                    pass
-            
+                    logger.debug(
+                        f"_refresh_single_window_safe: reload_theme_and_interface() completed for {window_name}"
+                    )
+                except Exception as e:
+                    logger.exception(
+                        f"_refresh_single_window_safe: reload_theme_and_interface() failed for {window_name}: {e}"
+                    )
+            else:
+                logger.debug(
+                    f"_refresh_single_window_safe: Window {window_name} has no on_theme_changed or reload_theme_and_interface method"
+                )
+
             # 3. Force redraw
+            logger.debug(
+                f"_refresh_single_window_safe: Requesting redraw for {window_name}"
+            )
             try:
-                window.update_idletasks()
-            except Exception:
-                pass
+                window.update()
+                logger.debug(
+                    f"_refresh_single_window_safe: Redraw completed for {window_name}"
+                )
+            except Exception as e:
+                logger.debug(
+                    f"_refresh_single_window_safe: Redraw failed for {window_name}: {e}"
+                )
         except Exception as exc:
-            logger.error("Error refreshing window %s: %s", window, exc)
+            logger.error(
+                "_refresh_single_window_safe error for %s: %s", window_name, exc
+            )
 
     def _apply_theme_to_all_widgets(self, root_widget):
         """Iteratively update all CTk widgets' colors to match the current theme, safely."""
@@ -225,18 +284,35 @@ class ThemeManager:
 
     def _refresh_single_window(self, window: ctk.CTkBaseClass) -> None:
         """Refresh a single window safely. Intended to be called from the mainloop via .after."""
+        window_name = window.__class__.__name__
+        logger.debug(f"_refresh_single_window: Starting for {window_name}")
         try:
             if not getattr(window, "winfo_exists", lambda: False)():
+                logger.debug(
+                    f"_refresh_single_window: Window {window_name} does not exist, returning"
+                )
                 return
+            logger.debug(
+                f"_refresh_single_window: Window {window_name} exists, calling _refresh_single_window_safe()"
+            )
             # Use the robust safe refresh logic by default
             self._refresh_single_window_safe(window)
+            logger.debug(
+                f"_refresh_single_window: Calling update_idletasks() for {window_name}"
+            )
 
             try:
                 window.update_idletasks()
-            except Exception:
-                pass
+                logger.debug(
+                    f"_refresh_single_window: update_idletasks() completed for {window_name}"
+                )
+            except Exception as e:
+                logger.debug(
+                    f"_refresh_single_window: update_idletasks() failed for {window_name}: {e}"
+                )
         except Exception as exc:
-            logger.debug("_refresh_single_window failed for %s: %s", window, exc)
+            logger.debug("_refresh_single_window failed for %s: %s", window_name, exc)
+        logger.debug(f"_refresh_single_window: Finished for {window_name}")
 
     def refresh_all_windows_async(self) -> None:
         """Schedule a non-blocking refresh for all registered windows.
@@ -245,23 +321,50 @@ class ThemeManager:
         keeps the mainloop responsive and avoids synchronous work that can freeze
         the UI when many windows are open.
         """
+        logger.debug(
+            f"refresh_all_windows_async: Starting, registered_windows={len(self.windows)}"
+        )
         alive = []
-        for window in list(self.windows):
+        for i, window in enumerate(list(self.windows)):
             try:
+                window_name = window.__class__.__name__
+                logger.debug(
+                    f"refresh_all_windows_async: [{i}] Checking window {window_name}"
+                )
                 if not getattr(window, "winfo_exists", lambda: False)():
+                    logger.debug(
+                        f"refresh_all_windows_async: [{i}] Window {window_name} does not exist, skipping"
+                    )
                     continue
+                logger.debug(
+                    f"refresh_all_windows_async: [{i}] Window {window_name} exists, scheduling refresh"
+                )
                 alive.append(window)
                 try:
                     # Prefer scheduling via the window itself so the callback runs
                     # in the right context and doesn't block the main thread.
                     window.after(1, lambda w=window: self._refresh_single_window(w))
-                except Exception:
+                    logger.debug(
+                        f"refresh_all_windows_async: [{i}] Scheduled refresh for {window_name}"
+                    )
+                except Exception as e:
                     # If scheduling fails (rare), do a best-effort synchronous call
+                    logger.debug(
+                        f"refresh_all_windows_async: [{i}] Scheduling failed for {window_name}, doing synchronous call: {e}"
+                    )
                     self._refresh_single_window(window)
             except Exception as exc:
-                logger.debug("Error scheduling refresh for window %s: %s", window, exc)
+                logger.debug(
+                    "refresh_all_windows_async: Error processing window %s: %s",
+                    window,
+                    exc,
+                )
         # Prune dead windows
+        logger.debug(
+            f"refresh_all_windows_async: Pruning dead windows - before={len(self.windows)}, alive={len(alive)}"
+        )
         self.windows = alive
+        logger.debug(f"refresh_all_windows_async: Finished")
 
     def verify_and_fix_all_windows(self) -> None:
         """Verify widget colours on all registered windows and fix mismatches.
@@ -361,7 +464,6 @@ class ThemeManager:
                 pass
         except Exception as exc:
             logger.debug("_verify_and_fix_window failed for %s: %s", window, exc)
-
 
     def apply_theme_to(self, widget: ctk.CTkBaseClass) -> None:
         """Public helper to apply current theme/appearance recursively to a widget.

@@ -53,6 +53,7 @@ class TemplateApp(ctk.CTk):
         self.geometry("360x535")
         self.visual_feedback_enabled = True
         self._after_ids = set()  # IDs dos afters agendados
+        self._reloading_theme = False  # Re-entrancy guard for theme reload
 
         # Carrega config de campos expansíveis
         self.expandable_fields = self.load_expandable_fields_config()
@@ -721,71 +722,24 @@ class TemplateApp(ctk.CTk):
         self.bind_all("<Control-z>", self.undo_fields)
         self.bind_all("<Control-y>", self.redo_fields)
 
-    def on_theme_changed(self):
+    def on_theme_changed(self) -> None:
         """Called by ThemeManager when the global theme or appearance changes.
 
-        Reapplies appearance recursively and updates key widget colours that
-        were created with theme-dependent colours so the UI updates immediately.
+        Reloads the interface to apply new theme colors to all custom widgets.
+        Safe from infinite loops because settings window _close() no longer
+        redundantly calls theme updates.
         """
         try:
-            if not hasattr(self, "theme_manager") or not self.theme_manager:
-                return
-            # ThemeManager already applies colors to all widgets before calling this method.
-            # We only need to handle custom/special overrides here.
-
-            # Update key buttons to use theme defaults (ensures colours update even if
-            # they were created earlier with theme-derived colours)
-            default_btn_fg = self.theme_manager.get_theme_default_color(
-                ctk.CTkButton, "fg_color"
+            logger.debug(
+                f"on_theme_changed: Called by theme_manager | "
+                f"theme_name='{getattr(self.theme_manager, 'theme_name', '?')}' | "
+                f"mode='{self.theme_manager.get_current_appearance()}'"
             )
-            hover = self.theme_manager.get_darker_color(default_btn_fg, 0.08)
-
-            for attr in (
-                "copy_button",
-                "preview_button",
-                "edit_button",
-                "add_btn",
-                "pin_button",
-                "settings_button",
-                "favorite_button",
-                "protect_button",
-                "btn_daily_password",
-            ):
-                try:
-                    w = getattr(self, attr, None)
-                    if w:
-                        try:
-                            w.configure(fg_color=default_btn_fg)
-                        except Exception:
-                            pass
-                        try:
-                            w.configure(hover_color=hover)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-
-            # Special case: keep the 'limpar' button visually distinct (darker)
-            try:
-                if hasattr(self, "btn_limpar_campos") and self.btn_limpar_campos:
-                    del_color = self.theme_manager.get_darker_color(
-                        default_btn_fg, 0.35
-                    )
-                    try:
-                        self.btn_limpar_campos.configure(fg_color=del_color)
-                    except Exception:
-                        pass
-                    try:
-                        self.btn_limpar_campos.configure(
-                            hover_color=self.theme_manager.get_darker_color(
-                                del_color, 0.1
-                            )
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
+            
+            # Reload interface to apply theme to all custom widgets
+            logger.debug("on_theme_changed: Calling reload_theme_and_interface()")
+            self.reload_theme_and_interface()
+            logger.debug("on_theme_changed: Interface reloaded successfully")
         except Exception:
             logger.exception("Error in on_theme_changed of main window")
 
@@ -797,6 +751,15 @@ class TemplateApp(ctk.CTk):
     # TODO: Implementar undo/redo e feedback visual aprimorado nas próximas etapas
 
     def draw_all_fields(self):
+        # Temporarily unbind from theme manager to prevent destroy-triggered unregister
+        try:
+            bind_id = getattr(self, "_theme_manager_destroy_bind", None)
+            if bind_id:
+                self.unbind("<Destroy>", bind_id)
+                logger.debug("draw_all_fields: Destroyed binding removed temporarily")
+        except Exception as e:
+            logger.debug(f"draw_all_fields: Could not unbind destroy handler: {e}")
+        
         # Salva valores antigos, tanto de Entry quanto de Textbox
         saved_values = {}
         for k, v in self.entries.items():
@@ -829,6 +792,17 @@ class TemplateApp(ctk.CTk):
 
         # Atualiza as cores das bordas dos campos
         self._update_field_borders()
+        
+        # Re-bind the destroy handler
+        try:
+            if self.winfo_exists() and hasattr(self, "theme_manager"):
+                bind_id = self.bind(
+                    "<Destroy>", lambda _event, w=self: self.theme_manager.unregister_window(w)
+                )
+                setattr(self, "_theme_manager_destroy_bind", bind_id)
+                logger.debug("draw_all_fields: Destroy binding restored")
+        except Exception as e:
+            logger.debug(f"draw_all_fields: Could not rebind destroy handler: {e}")
 
     def _update_single_field_border(self, field_name, entry):
         """Atualiza a cor da borda de um campo específico baseado no template atual."""
@@ -2260,7 +2234,6 @@ class TemplateApp(ctk.CTk):
             self._safe_after(delay, lambda: animate(count - 1))
 
         animate(times)
-
 
     def _refresh_all_template_selectors(self, select_template=None):
         # Atualiza todos os OptionMenus relevantes (main, editor, quick popup)
@@ -4335,72 +4308,119 @@ class TemplateApp(ctk.CTk):
         raise RuntimeError("Log viewer has been removed from the application UI")
 
     def reload_theme_and_interface(self):
-        # 1. Salva o estado atual
-        state = {
-            "current_template": self.current_template,
-            "current_template_display": self.current_template_display.get(),
-            "dynamic_fields": list(self.dynamic_fields),
-            "fixed_field_modes": dict(self.fixed_field_modes),
-            "expandable_fields": list(self.expandable_fields),
-            "field_values": {},
-        }
-        for k, v in self.entries.items():
+        logger.debug("reload_theme_and_interface: Starting interface reload")
+        
+        # Re-entrancy guard - prevent simultaneous reloads
+        if self._reloading_theme:
+            logger.debug("reload_theme_and_interface: Already reloading, skipping nested call")
+            return
+        
+        self._reloading_theme = True
+        try:
+            # Temporarily unbind from theme manager to prevent destroy-triggered unregister
+            logger.debug("reload_theme_and_interface: Temporarily unbinding destroy handler")
             try:
-                state["field_values"][k] = v.get()
-            except Exception:
+                bind_id = getattr(self, "_theme_manager_destroy_bind", None)
+                if bind_id:
+                    self.unbind("<Destroy>", bind_id)
+                    logger.debug("reload_theme_and_interface: Destroy binding removed temporarily")
+            except Exception as e:
+                logger.debug(f"reload_theme_and_interface: Could not unbind destroy handler: {e}")
+            
+            # 1. Salva o estado atual
+            logger.debug("reload_theme_and_interface: Saving current state")
+            state = {
+                "current_template": self.current_template,
+                "current_template_display": self.current_template_display.get(),
+                "dynamic_fields": list(self.dynamic_fields),
+                "fixed_field_modes": dict(self.fixed_field_modes),
+                "expandable_fields": list(self.expandable_fields),
+                "field_values": {},
+            }
+            for k, v in self.entries.items():
                 try:
-                    state["field_values"][k] = v.get("1.0", "end-1c")
+                    state["field_values"][k] = v.get()
                 except Exception:
-                    state["field_values"][k] = ""
+                    try:
+                        state["field_values"][k] = v.get("1.0", "end-1c")
+                    except Exception:
+                        state["field_values"][k] = ""
+            logger.debug(f"reload_theme_and_interface: State saved - template='{state['current_template']}', fields={len(state['field_values'])}")
 
-        # 2. Destroi widgets principais
-        for widget in self.winfo_children():
-            widget.destroy()
+            # 2. Destroi widgets principais
+            logger.debug("reload_theme_and_interface: Destroying all child widgets")
+            for widget in self.winfo_children():
+                widget.destroy()
+            logger.debug("reload_theme_and_interface: Widgets destroyed")
 
-        # 3. Recria interface
-        self._build_main_interface()
-        # 4. Restaura estado
-        self.current_template = state["current_template"]
-        self.current_template_display.set(state["current_template_display"])
-        self.dynamic_fields = state["dynamic_fields"]
-        self.fixed_field_modes = state["fixed_field_modes"]
-        self.expandable_fields = state["expandable_fields"]
-        self.load_template_placeholders()
-        # 5. Restaura valores dos campos
-        for k in self.entries:
-            valor_antigo = state["field_values"].get(k, None)
-            entry = self.entries[k]
-            if valor_antigo not in (None, ""):
-                # Primeiro limpa o campo com segurança
-                self._reset_field_value(entry)
-                # Depois insere o valor antigo
-                try:
-                    if isinstance(entry, ctk.CTkTextbox):
-                        entry.insert("1.0", valor_antigo)
-                    elif isinstance(entry, ctk.CTkEntry):
-                        entry.insert(0, valor_antigo)
-                    elif isinstance(entry, (ctk.StringVar, ctk.BooleanVar)):
-                        entry.set(valor_antigo)
-                    elif isinstance(entry, (ctk.CTkSwitch, ctk.CTkCheckBox)):
-                        try:
-                            if valor_antigo.lower() in ("true", "1", "yes", "on"):
-                                if hasattr(entry, "select"):
-                                    entry.select()
-                                else:
-                                    entry._check_state = True
-                                    entry._update_image()
-                        except Exception as e:
-                            logger.debug(
-                                f"Erro ao restaurar valor {valor_antigo} para {k}: {e}"
-                            )
-                    elif hasattr(entry, "insert"):
-                        entry.insert(0, valor_antigo)
-                    elif hasattr(entry, "set"):
-                        entry.set(valor_antigo)
-                except Exception as e:
-                    logger.warning(
-                        f"Erro ao restaurar valor {valor_antigo} para {k}: {e}"
+            # 3. Recria interface
+            logger.debug("reload_theme_and_interface: Rebuilding main interface")
+            self._build_main_interface()
+            logger.debug("reload_theme_and_interface: Main interface rebuilt")
+            
+            # 4. Restaura estado
+            logger.debug("reload_theme_and_interface: Restoring state")
+            self.current_template = state["current_template"]
+            self.current_template_display.set(state["current_template_display"])
+            self.dynamic_fields = state["dynamic_fields"]
+            self.fixed_field_modes = state["fixed_field_modes"]
+            self.expandable_fields = state["expandable_fields"]
+            self.load_template_placeholders()
+            
+            # 5. Restaura valores dos campos
+            logger.debug(f"reload_theme_and_interface: Restoring {len(state['field_values'])} field values")
+            for k in self.entries:
+                valor_antigo = state["field_values"].get(k, None)
+                entry = self.entries[k]
+                if valor_antigo not in (None, ""):
+                    # Primeiro limpa o campo com segurança
+                    self._reset_field_value(entry)
+                    # Depois insere o valor antigo
+                    try:
+                        if isinstance(entry, ctk.CTkTextbox):
+                            entry.insert("1.0", valor_antigo)
+                        elif isinstance(entry, ctk.CTkEntry):
+                            entry.insert(0, valor_antigo)
+                        elif isinstance(entry, (ctk.StringVar, ctk.BooleanVar)):
+                            entry.set(valor_antigo)
+                        elif isinstance(entry, (ctk.CTkSwitch, ctk.CTkCheckBox)):
+                            try:
+                                if valor_antigo.lower() in ("true", "1", "yes", "on"):
+                                    if hasattr(entry, "select"):
+                                        entry.select()
+                                    else:
+                                        entry._check_state = True
+                                        entry._update_image()
+                            except Exception as e:
+                                logger.debug(
+                                    f"Erro ao restaurar valor {valor_antigo} para {k}: {e}"
+                                )
+                        elif hasattr(entry, "insert"):
+                            entry.insert(0, valor_antigo)
+                        elif hasattr(entry, "set"):
+                            entry.set(valor_antigo)
+                    except Exception as e:
+                        logger.warning(
+                            f"Erro ao restaurar valor {valor_antigo} para {k}: {e}"
+                        )
+            logger.debug("reload_theme_and_interface: State restored, interface reload complete")
+        except Exception:
+            logger.exception("reload_theme_and_interface: Critical error during interface reload")
+        finally:
+            # Re-bind the destroy handler
+            logger.debug("reload_theme_and_interface: Re-binding destroy handler to theme manager")
+            try:
+                if self.winfo_exists() and hasattr(self, "theme_manager"):
+                    bind_id = self.bind(
+                        "<Destroy>", lambda _event, w=self: self.theme_manager.unregister_window(w)
                     )
+                    setattr(self, "_theme_manager_destroy_bind", bind_id)
+                    logger.debug("reload_theme_and_interface: Destroy binding restored")
+            except Exception as e:
+                logger.debug(f"reload_theme_and_interface: Could not rebind destroy handler: {e}")
+            
+            self._reloading_theme = False
+            logger.debug("reload_theme_and_interface: Finished (guard released)")
 
     def load_theme_config(self):
         try:

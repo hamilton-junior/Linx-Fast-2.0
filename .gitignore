@@ -1,4 +1,4 @@
-*pycache*
+*_pycache_*
 *.spec
 templates/Template Padrão.txt
 log/*

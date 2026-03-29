@@ -1,12 +1,12 @@
 {
-    "geometry": "392x566+807+174",
+    "geometry": "392x654+698+94",
     "expandable_fields": [
         "Procedimento Executado",
         "Problema Relatado"
     ],
     "theme_name": "green",
-    "appearance_mode": "light",
-    "log_level": "INFO",
+    "appearance_mode": "dark",
+    "log_level": "DEBUG",
     "templates_folder": "templates",
     "export_folder": "",
     "notifications": {
@@ -25,7 +25,10 @@
         "size": 12
     },
     "daily_password": {
-        "date": "2026-03-24",
+        "date": "2026-03-29",
         "password": null
+    },
+    "field_orders": {
+        "Suporte / Abertura de Chamado": []
     }
 }
