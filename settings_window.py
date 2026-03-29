@@ -68,6 +68,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self._geometry_padding = (0, 0)
         self._min_geometry = (400, 320)
         self._in_theme_change = False  # Re-entrancy guard for theme updates
+        self._in_theme_update = False  # Prevent closing during theme updates
 
         # UI: tabs
         self.tabs = ctk.CTkTabview(self, command=self._on_tab_changed)
@@ -440,6 +441,7 @@ class SettingsWindow(ctk.CTkToplevel):
             return
 
         self._in_theme_change = True
+        self._in_theme_update = True  # Prevent window close during theme update
         try:
             logger.debug(f"_on_theme_change: User selected theme '{value}'")
             # Persist under the canonical key name
@@ -468,6 +470,8 @@ class SettingsWindow(ctk.CTkToplevel):
                 messagebox.showerror("Erro", f"Erro ao alterar tema: {e}")
         finally:
             self._in_theme_change = False
+            # Keep _in_theme_update True for a bit longer to allow async callback to complete
+            self.after(500, lambda: setattr(self, "_in_theme_update", False))
 
     def _on_appearance_change(self, value):
         """Handle appearance mode changes in real-time"""
@@ -476,6 +480,7 @@ class SettingsWindow(ctk.CTkToplevel):
             return
 
         self._in_theme_change = True
+        self._in_theme_update = True  # Prevent window close during theme update
         try:
             logger.debug(f"_on_appearance_change: User selected appearance mode '{value}'")
             self.config["appearance_mode"] = value
@@ -503,6 +508,8 @@ class SettingsWindow(ctk.CTkToplevel):
                 messagebox.showerror("Erro", f"Erro ao alterar modo de aparência: {e}")
         finally:
             self._in_theme_change = False
+            # Keep _in_theme_update True for a bit longer to allow async callback to complete
+            self.after(500, lambda: setattr(self, "_in_theme_update", False))
 
     def _build_advanced_tab(self):
         f = ctk.CTkFrame(self.tabs.tab("Avançado"))
@@ -668,6 +675,12 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def _close(self):
         logger.debug("_close: Closing settings window")
+        
+        # Prevent closing during theme updates
+        if self._in_theme_update:
+            logger.debug("_close: Theme update in progress, deferring window close")
+            return
+        
         if getattr(self, "_is_closing", False):
             logger.debug("_close: Already closing, skipping")
             return
@@ -782,6 +795,7 @@ class SettingsWindow(ctk.CTkToplevel):
         toplevel background so it matches the active theme immediately.
         """
         logger.debug("on_theme_changed: Called by theme_manager")
+        self._in_theme_update = True
         try:
             if hasattr(self, "theme_manager"):
                 try:
@@ -811,3 +825,5 @@ class SettingsWindow(ctk.CTkToplevel):
             logger.debug("on_theme_changed: Complete")
         except Exception:
             logger.exception("on_theme_changed: Error")
+        finally:
+            self._in_theme_update = False
