@@ -5,6 +5,9 @@ from logger_config import set_log_level
 
 logger = logging.getLogger(__name__)
 
+THEME_KEY = "theme_name"
+LEGACY_THEME_KEY = "theme"
+
 
 DEFAULT_CONFIG = {
     "geometry": None,
@@ -31,6 +34,10 @@ def load_config(path="config.json"):
             # Merge defaults
             merged = DEFAULT_CONFIG.copy()
             merged.update(cfg)
+            # Migração: respeita a chave canônica e usa legado apenas como fallback.
+            if THEME_KEY not in cfg and LEGACY_THEME_KEY in cfg:
+                merged[THEME_KEY] = cfg[LEGACY_THEME_KEY]
+            merged.pop(LEGACY_THEME_KEY, None)
             return merged
         except Exception as e:
             logger.error(f"Erro ao carregar {path}: {e}")
@@ -40,8 +47,10 @@ def load_config(path="config.json"):
 
 def save_config(config, path="config.json"):
     try:
+        serialized_config = config.copy()
+        serialized_config.pop(LEGACY_THEME_KEY, None)
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4, ensure_ascii=False)
+            json.dump(serialized_config, f, indent=4, ensure_ascii=False)
         return True
     except Exception as e:
         logger.error(f"Erro ao salvar config {path}: {e}")

@@ -215,7 +215,7 @@ class SettingsWindow(ctk.CTkToplevel):
         )
         ctk_themes = ["green", "blue", "dark-blue"]
         theme_files = ctk_themes + custom_themes
-        self.theme_var = ctk.StringVar(value=self.config.get("theme", "Linx"))
+        self.theme_var = ctk.StringVar(value=self.config.get("theme_name", "green"))
         theme_combo = ctk.CTkComboBox(
             theme_select_frame,
             values=theme_files,
@@ -411,7 +411,8 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def _on_theme_change(self, value):
         """Handle theme changes in real-time"""
-        self.config["theme"] = value
+        self.config["theme_name"] = value
+        self.config.pop("theme", None)
         try:
             self.theme_manager.set_theme(value)
             save_config(self.config, self.config_path)
@@ -607,14 +608,18 @@ class SettingsWindow(ctk.CTkToplevel):
             import json
 
             obj = json.loads(cfg)
+            if "theme_name" not in obj and "theme" in obj:
+                obj["theme_name"] = obj["theme"]
+            obj.pop("theme", None)
             # Merge and save
             self.config.update(obj)
+            self.config.pop("theme", None)
             save_config(self.config, self.config_path)
             messagebox.showinfo("Importado", "Configuração importada com sucesso.")
             # Apply some settings immediately
-            if "theme" in obj:
+            if "theme_name" in obj:
                 try:
-                    self.theme_manager.set_theme(obj["theme"])
+                    self.theme_manager.set_theme(obj["theme_name"])
                 except Exception:
                     pass
             if "appearance_mode" in obj:
@@ -634,8 +639,10 @@ class SettingsWindow(ctk.CTkToplevel):
         try:
             import json
 
+            export_config = self.config.copy()
+            export_config.pop("theme", None)
             with open(path, "w", encoding="utf-8") as f:
-                json.dump(self.config, f, indent=4, ensure_ascii=False)
+                json.dump(export_config, f, indent=4, ensure_ascii=False)
             messagebox.showinfo("Exportado", f"Config exportada para: {path}")
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao exportar configuração: {e}")
