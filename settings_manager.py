@@ -1,6 +1,7 @@
 import json
 import os
 import logging
+from copy import deepcopy
 from logger_config import set_log_level
 
 logger = logging.getLogger(__name__)
@@ -23,19 +24,37 @@ DEFAULT_CONFIG = {
 }
 
 
+def _deep_merge_dict(defaults, user_cfg):
+    """Mescla recursivamente defaults e configurações do usuário."""
+    merged = deepcopy(defaults)
+
+    if not isinstance(user_cfg, dict):
+        return merged
+
+    for key, user_value in user_cfg.items():
+        default_value = merged.get(key)
+        if isinstance(default_value, dict) and isinstance(user_value, dict):
+            merged[key] = _deep_merge_dict(default_value, user_value)
+        else:
+            merged[key] = user_value
+
+    return merged
+
+
 def load_config(path="config.json"):
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
+            if not isinstance(cfg, dict):
+                logger.warning(f"Config em {path} não é um objeto JSON; usando defaults")
+                return deepcopy(DEFAULT_CONFIG)
             # Merge defaults
-            merged = DEFAULT_CONFIG.copy()
-            merged.update(cfg)
-            return merged
+            return _deep_merge_dict(DEFAULT_CONFIG, cfg)
         except Exception as e:
             logger.error(f"Erro ao carregar {path}: {e}")
-            return DEFAULT_CONFIG.copy()
-    return DEFAULT_CONFIG.copy()
+            return deepcopy(DEFAULT_CONFIG)
+    return deepcopy(DEFAULT_CONFIG)
 
 
 def save_config(config, path="config.json"):
